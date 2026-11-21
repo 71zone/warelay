@@ -254,7 +254,7 @@ function planTable(block: Extract<ReplyBlock, { type: "table" }>): PlannedMessag
   const planned: PlannedMessage[] = grid
     ? [{ kind: "text", text: fence(grid) }]
     : splitText(tableToRecords(header, rows)).map(text => ({ kind: "text", text }) satisfies PlannedMessage);
-  if (!grid || rows.length > CSV_ROW_THRESHOLD) {
+  if (rows.length > CSV_ROW_THRESHOLD) {
     planned.push({ kind: "file", fileName: "table.csv", mimeType: "text/csv", content: tableToCsv(header, rows) });
   }
   return planned;

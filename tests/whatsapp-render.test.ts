@@ -74,19 +74,21 @@ test('newlines in cells collapse and single-column and header-only tables still 
   assert.deepEqual(texts([{ type: 'table', header: ['A', 'B'], rows: [] }]), ['```\nA | B\n--+--\n```']);
 });
 
-test('wide tables use the record layout and also ship a CSV', async () => {
+test('short wide tables use the record layout and ship no CSV', () => {
+  const block: ReplyBlock = { type: 'table', header: ['City', 'Description of the place'], rows: [['Hanoi', 'The capital, with a long story behind it'], ['Hue', '']] };
+  assert.deepEqual(planReply([block]), [{ kind: 'text', text: '*Hanoi*\nDescription of the place: The capital, with a long story behind it\n\n*Hue*' }]);
+});
+
+test('a CSV is written through the media store for tables with more than 8 rows', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'wa-render-'));
   try {
-    const block: ReplyBlock = { type: 'table', header: ['City', 'Description of the place'], rows: [['Hanoi', 'The capital, with a long story behind it'], ['Hue', '']] };
-    const planned = planReply([block]);
-    assert.equal(planned.length, 2);
-    assert.deepEqual(planned[0], { kind: 'text', text: '*Hanoi*\nDescription of the place: The capital, with a long story behind it\n\n*Hue*' });
-    const rendered = await renderReply([block], createMediaStore(dir));
+    const rows = Array.from({ length: 9 }, (_, index) => [`r${index}`, 'a,b']);
+    const rendered = await renderReply([{ type: 'table', header: ['k', 'v'], rows }], createMediaStore(dir));
     const csv = rendered[1];
     assert.ok(csv?.kind === 'media');
     assert.equal(csv.attachment.fileName, 'table.csv');
     assert.equal(csv.attachment.mimeType, 'text/csv');
-    assert.equal(await readFile(csv.attachment.path, 'utf8'), '\uFEFFCity,Description of the place\r\nHanoi,"The capital, with a long story behind it"\r\nHue,\r\n');
+    assert.ok((await readFile(csv.attachment.path, 'utf8')).startsWith('\uFEFFk,v\r\nr0,"a,b"\r\n'));
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
