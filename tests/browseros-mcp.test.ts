@@ -93,6 +93,8 @@ test('run results are read from structured content, from JSON text content, and 
       assert.equal(calls[1]?.session, 'task-1');
       assert.equal(calls[0]?.timeout, 25000);
       assert.equal(calls[0]?.maxChars, 500000);
+      await runScript(connection, 'structured', undefined, undefined, 2_000_000);
+      assert.equal(calls[2]?.maxChars, 2_000_000);
       await assert.rejects(runScript(connection, 'failed', undefined), /BrowserOS operation failed: "boom"/);
       await assert.rejects(runScript(connection, 'unsupported', undefined), /Unsupported BrowserOS run response/);
       await assert.rejects(runScript(connection, 'rejected', undefined), /BrowserOS tool rejected the operation/);

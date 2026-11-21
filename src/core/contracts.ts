@@ -14,7 +14,11 @@ export type ReplyBlock =
   /** A draft the user is meant to copy and send. `title` is its subject line (email drafts). Delivered as separate messages for the title and the body so each copies cleanly. */
   | { type: 'draft'; title?: string; text: string }
   | { type: 'code'; language: string | null; code: string }
-  | { type: 'table'; header: string[]; rows: string[][] }
+  /**
+   * A table or card of rows. `images`, when not empty, are pictures of it as the assistant displayed it, top to bottom (a tall table comes in several);
+   * messaging adapters deliver those instead of the header and rows, which remain as the text form for adapters that cannot show images.
+   */
+  | { type: 'table'; header: string[]; rows: string[][]; images?: Attachment[] }
   | { type: 'attachment'; attachment: Attachment };
 export interface IncomingMessage {
   id: string;

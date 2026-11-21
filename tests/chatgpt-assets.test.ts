@@ -45,7 +45,7 @@ function fakePage(sources: Map<number, Source>): { context: AssetContext; calls:
   return { context, calls, released, allocated, directory };
 }
 
-const extractionOf = (assets: Extraction['assets']): Extraction => ({ url: 'https://chatgpt.com/c/x', text: '', blocks: assets.map(asset => ({ type: 'asset', id: asset.id })), assets });
+const extractionOf = (assets: Extraction['assets']): Extraction => ({ url: 'https://chatgpt.com/c/x', text: '', blocks: assets.map(asset => ({ type: 'asset', id: asset.id })), assets, shots: [] });
 
 async function exists(path: string): Promise<boolean> {
   try { await access(path); return true; } catch { return false; }
@@ -102,6 +102,6 @@ for (const [name, source, reason] of [
 test('placeholders for assets the page no longer lists are dropped', async () => {
   const page = fakePage(new Map());
   try {
-    assert.deepEqual(await resolveBlocks({ url: 'https://chatgpt.com/c/x', text: '', blocks: [{ type: 'markdown', text: 'kept' }, { type: 'asset', id: 9 }], assets: [] }, page.context), [{ type: 'markdown', text: 'kept' }]);
+    assert.deepEqual(await resolveBlocks({ url: 'https://chatgpt.com/c/x', text: '', blocks: [{ type: 'markdown', text: 'kept' }, { type: 'asset', id: 9 }], assets: [], shots: [] }, page.context), [{ type: 'markdown', text: 'kept' }]);
   } finally { await rm(page.context.media.directory, { recursive: true, force: true }); }
 });

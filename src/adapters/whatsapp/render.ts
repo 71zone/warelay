@@ -1,12 +1,10 @@
 import { writeFile } from "node:fs/promises";
 import type { Attachment, ReplyBlock } from "../../core/contracts.js";
+import { SMALL_TABLE_MAX_ROWS, cleanCell, normalizeTable, tableToGrid } from "../../core/table.js";
 import type { MediaStore } from "../../infrastructure/media.js";
 
 export const MAX_TEXT_CHARS = 4000;
 export const MAX_INLINE_CODE_CHARS = 12000;
-export const MAX_GRID_WIDTH = 40;
-export const MAX_GRID_ROWS = 30;
-export const CSV_ROW_THRESHOLD = 8;
 
 export type OutboundMessage =
   | { kind: "text"; text: string }
@@ -37,12 +35,6 @@ const EXTENSIONS: ReadonlyMap<string, string> = new Map([
 
 export function extensionForLanguage(language: string | null): string {
   return EXTENSIONS.get((language ?? "").trim().toLowerCase()) ?? "txt";
-}
-
-function width(text: string): number {
-  let count = 0;
-  for (const _ of text) count++;
-  return count;
 }
 
 function cutPoint(text: string, at: number): number {
@@ -200,33 +192,10 @@ function planCode(block: Extract<ReplyBlock, { type: "code" }>): PlannedMessage[
   return [{ kind: "text", text: fence(code) }];
 }
 
-function cleanCell(cell: string): string {
-  return cell.replace(/\s*[\r\n]+\s*/g, " ").replace(/\t/g, " ").trim();
-}
-
-function normalizeTable(header: string[], rows: string[][]): { header: string[]; rows: string[][] } {
-  const columns = Math.max(header.length, ...rows.map(row => row.length));
-  const pad = (row: string[]): string[] => Array.from({ length: columns }, (_, index) => row[index] ?? "");
-  return { header: pad(header), rows: rows.map(pad) };
-}
-
 export function tableToCsv(header: string[], rows: string[][]): string {
   const { header: head, rows: body } = normalizeTable(header, rows);
   const field = (value: string): string => (/[",\r\n]/.test(value) ? `"${value.replaceAll('"', '""')}"` : value);
   return `\uFEFF${[head, ...body].map(row => row.map(field).join(",")).join("\r\n")}\r\n`;
-}
-
-/** Aligned monospace grid, or null when it would be wider than `maxWidth` or taller than `maxRows`. */
-export function tableToGrid(header: string[], rows: string[][], maxWidth = MAX_GRID_WIDTH, maxRows = MAX_GRID_ROWS): string | null {
-  if (rows.length > maxRows) return null;
-  const table = normalizeTable(header.map(cleanCell), rows.map(row => row.map(cleanCell)));
-  const widths = table.header.map((_, column) => Math.max(width(table.header[column] ?? ""), ...table.rows.map(row => width(row[column] ?? ""))));
-  const render = (row: string[]): string =>
-    row.map((cell, column) => cell + " ".repeat((widths[column] ?? 0) - width(cell))).join(" | ").trimEnd();
-  const rule = widths.map(size => "-".repeat(Math.max(size, 1))).join("-+-");
-  const lines = [render(table.header), rule, ...table.rows.map(render)];
-  if (lines.some(line => width(line) > maxWidth)) return null;
-  return lines.join("\n");
 }
 
 /** Row-per-record layout: bold first cell, then `Header: value` lines. Output is already in WhatsApp syntax. */
@@ -247,14 +216,16 @@ export function tableToRecords(header: string[], rows: string[][]): string {
     .join("\n\n");
 }
 
+/** A table that arrives with pictures of itself is sent as those native images alone; without them it is a grid, or records plus a CSV when it is big. */
 function planTable(block: Extract<ReplyBlock, { type: "table" }>): PlannedMessage[] {
   const { header, rows } = block;
+  if (block.images?.length) return block.images.map(attachment => ({ kind: "media", attachment }) satisfies PlannedMessage);
   if (header.every(cell => !cell.trim()) && rows.every(row => row.every(cell => !cell.trim()))) return [];
   const grid = tableToGrid(header, rows);
   const planned: PlannedMessage[] = grid
     ? [{ kind: "text", text: fence(grid) }]
     : splitText(tableToRecords(header, rows)).map(text => ({ kind: "text", text }) satisfies PlannedMessage);
-  if (rows.length > CSV_ROW_THRESHOLD) {
+  if (rows.length > SMALL_TABLE_MAX_ROWS) {
     planned.push({ kind: "file", fileName: "table.csv", mimeType: "text/csv", content: tableToCsv(header, rows) });
   }
   return planned;

@@ -50,13 +50,17 @@ export async function openMcp(endpoint: URL, signal?: AbortSignal): Promise<McpC
   } catch (error) { await client.close().catch(() => undefined); throw signal?.aborted ? signal.reason : error; }
 }
 
+/** Largest result, in characters, a BrowserOS script returns inline unless the caller asks for more. */
+const DEFAULT_RESULT_CHARS = 500000;
+
 /**
  * Runs one BrowserOS script; returns its value and the logical task handle the server reported, if any.
  * `signal` cancels the wait and rejects with the signal's reason. The SDK only abandons the request: the underlying HTTP exchange ends when the caller closes the client.
+ * `maxChars` raises the cap on the size of the returned value (BrowserOS accepts up to 2000000), for scripts that return binary data as base64.
  */
-export async function runScript(connection: Pick<McpConnection, 'client' | 'runName'>, code: string, session: string | undefined, signal?: AbortSignal): Promise<{ value: unknown; session: string | undefined }> {
+export async function runScript(connection: Pick<McpConnection, 'client' | 'runName'>, code: string, session: string | undefined, signal?: AbortSignal, maxChars = DEFAULT_RESULT_CHARS): Promise<{ value: unknown; session: string | undefined }> {
   signal?.throwIfAborted();
-  const result = await connection.client.callTool({ name: connection.runName, arguments: { code, timeout: 25000, maxChars: 500000, ...(session ? { session } : {}) } }, undefined, { timeout: 35000, signal })
+  const result = await connection.client.callTool({ name: connection.runName, arguments: { code, timeout: 25000, maxChars, ...(session ? { session } : {}) } }, undefined, { timeout: 35000, signal })
     .catch((error: unknown) => { throw signal?.aborted ? signal.reason : error; });
   if (result.isError) throw new Error('BrowserOS tool rejected the operation. Inspect its connection and browser.');
   let raw: unknown = result.structuredContent;

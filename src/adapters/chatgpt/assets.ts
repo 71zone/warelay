@@ -2,8 +2,10 @@ import { open, rm } from 'node:fs/promises';
 import { basename, extname } from 'node:path';
 import { z } from 'zod';
 import type { Attachment, AttachmentKind, Logger, ReplyBlock } from '../../core/contracts.js';
+import { isBigTable } from '../../core/table.js';
 import { MAX_MEDIA_BYTES, type MediaStore } from '../../infrastructure/media.js';
 import type { Extraction } from './extract.js';
+import { MAX_REPLY_SHOTS, captureShot } from './shots.js';
 
 /** Most images and files delivered for one reply; further ones are logged, reported in the reply and skipped. */
 export const MAX_REPLY_ASSETS = 6;
@@ -95,8 +97,8 @@ function kindOf(mimeType: string): AttachmentKind {
 }
 
 export interface AssetContext {
-  /** Runs one BrowserOS script on the shared session and returns its value. */
-  run: (code: string) => Promise<unknown>;
+  /** Runs one BrowserOS script on the shared session and returns its value. `maxChars` raises the size cap of the script's result (default 500000). */
+  run: (code: string, maxChars?: number) => Promise<unknown>;
   pageId: number;
   media: MediaStore;
   logger: Logger;
@@ -138,12 +140,33 @@ async function fetchAsset(asset: Extraction['assets'][number], context: AssetCon
 /**
  * Turns an extraction into deliverable blocks: every `asset` placeholder is fetched into the media store and becomes an `attachment` block at its place.
  * An asset that cannot be fetched (or is over the size or count limits) stays visible as a `(could not retrieve <name>)` note and the rest is kept.
+ * A big table (see isBigTable) and every card of rows is screenshotted as ChatGPT drew it and keeps the pictures in `images`; when that fails, or the reply
+ * has more than MAX_REPLY_SHOTS of them, the table stays as it was and is delivered as text.
  */
 export async function resolveBlocks(extracted: Extraction, context: AssetContext): Promise<ReplyBlock[]> {
   const assets = new Map(extracted.assets.map(asset => [asset.id, asset]));
+  const shots = new Map(extracted.shots.map(shot => [shot.block, shot]));
   const blocks: ReplyBlock[] = [];
   let attempted = 0;
-  for (const block of extracted.blocks) {
+  let pictured = 0;
+  for (const [index, block] of extracted.blocks.entries()) {
+    if (block.type === 'table') {
+      const shot = shots.get(index);
+      if (!shot || (shot.kind === 'table' && !isBigTable(block.header, block.rows))) { blocks.push(block); continue; }
+      if (pictured >= MAX_REPLY_SHOTS) {
+        context.logger(`Not picturing a table: ChatGPT returned more than ${MAX_REPLY_SHOTS} big tables in one reply; it is sent as text.`);
+        blocks.push(block);
+        continue;
+      }
+      pictured++;
+      try {
+        blocks.push({ ...block, images: await captureShot(shot.id, context) });
+      } catch (error) {
+        context.logger(`Could not take a picture of a table in ChatGPT's reply (${error instanceof Error ? error.message : String(error)}); it is sent as text.`);
+        blocks.push(block);
+      }
+      continue;
+    }
     if (block.type !== 'asset') { blocks.push(block); continue; }
     const asset = assets.get(block.id);
     if (!asset) continue;

@@ -6,7 +6,8 @@ import { locateAssistant } from './dom.js';
  * It is separate from the inspection poll because it walks the whole message. Prose becomes Markdown (rebuilt from the DOM, since ChatGPT's own
  * "copy" output is not reachable), fenced code and tables become their own blocks, writing cards become `draft` blocks, and generated images and
  * downloadable files become `asset` blocks.
- * Each asset element is stamped with `data-wab-asset="<id>"` so the later byte-transfer scripts can find it.
+ * Each asset element is stamped with `data-wab-asset="<id>"` so the later byte-transfer scripts can find it. Each table, and each card of rows, is
+ * stamped with `data-wab-shot="<id>"` and listed in `shots` so the adapter can screenshot it (see shots.ts) when it is too big for text.
  *
  * DOM facts it relies on (ChatGPT's DIL renderer, observed live):
  * - Prose sits in `[data-markdown-text-style="assistant-message"] [data-dil-response]` as plain p/h1-h6/ul/ol/blockquote/table elements with
@@ -20,10 +21,13 @@ import { locateAssistant } from './dom.js';
  *   `[data-testid="chatgpt-writing-block"]` surface with `data-writing-block-variant` ("chat_message", "email", ...), a `header` (label such as
  *   "Writing", or the subject line for an email, plus Copy / Open editor / Send buttons), and the draft as a ProseMirror editor (p, ul, strong, em,
  *   br). The surface also carries ChatGPT's own Markdown copy text in `data-markdown-copy-text`. Prose around the card is a sibling of the widget.
+ * - A card of rows (the STAR framework: a letter, a bold title and a description per row) is a `[data-d-component="box"][data-d-has-border]` whose direct
+ *   children are `[data-d-component="row"]` (each holding two boxes: the letter, then the text) separated by dividers; it has no table markup. A table sits in
+ *   a `[data-d-component="table"]` frame that can be much wider than the table itself, so the screenshot targets the `table` element.
  */
 export const chatgptExtractionScript = String.raw`(targetUserId) => {
   ${locateAssistant}
-  const result = { url: location.href, text: '', blocks: [], assets: [] };
+  const result = { url: location.href, text: '', blocks: [], assets: [], shots: [] };
   if (!holder) return result;
   const prose = holder.querySelector('[data-markdown-text-style="assistant-message"]');
   result.text = prose?.innerText || '';
@@ -159,6 +163,27 @@ export const chatgptExtractionScript = String.raw`(targetUserId) => {
     return { type: 'table', header: padded[0], rows: padded.slice(1) };
   };
 
+  // A bordered box of several "row" components (a letter, a title and a description each) is a table that has no table markup. It counts as one only from
+  // CARD_ROWS rows on, so a box of one or two labelled paragraphs stays prose.
+  const CARD_ROWS = 3;
+  const isRowCard = (el) => el.matches('[data-d-component="box"][data-d-has-border]') && Array.from(el.children).filter(child => child.getAttribute('data-d-component') === 'row').length >= CARD_ROWS;
+  const cardBlock = (card) => {
+    const rows = Array.from(card.children).filter(child => child.getAttribute('data-d-component') === 'row')
+      .map(row => Array.from(row.children).filter(cell => !cell.matches(SKIP))
+        .map(cell => itemsOf(cell).map(part => paragraph(part.nodes || Array.from(part.el.childNodes), false)).filter(Boolean).join('\n')))
+      .filter(row => row.some(cell => cell));
+    return rows.length ? { type: 'table', header: [], rows } : null;
+  };
+
+  // The reader stamps each table or card it returns with data-wab-shot="<id>" and lists it in result.shots (kind and the index of its block), so the adapter
+  // can screenshot the element that ChatGPT drew when the table is too big for text.
+  let nextShot = 0;
+  const addShot = (el, kind) => {
+    const id = ++nextShot;
+    el.setAttribute('data-wab-shot', String(id));
+    result.shots.push({ id, kind, block: blocks.length - 1 });
+  };
+
   let nextAsset = 0;
   const addAsset = (el, kind, name) => {
     const id = ++nextAsset;
@@ -190,7 +215,7 @@ export const chatgptExtractionScript = String.raw`(targetUserId) => {
     for (const node of parent.childNodes) {
       if (node.nodeType === 3) { run.push(node); continue; }
       if (node.nodeType !== 1 || node.matches(SKIP)) continue;
-      if (node.matches(BLOCKS)) { endRun(); out.push({ el: node }); }
+      if (node.matches(BLOCKS) || isRowCard(node)) { endRun(); out.push({ el: node }); }
       else if (hasBlock(node)) { endRun(); out.push(...itemsOf(node)); }
       else if (LINES.test(tagOf(node))) { endRun(); run.push(node); endRun(); }
       else run.push(node);
@@ -270,7 +295,8 @@ export const chatgptExtractionScript = String.raw`(targetUserId) => {
     if (!inProse(item)) return;
     if (el.matches(CARD)) { addCard(el); return; }
     if (el.matches(CODE)) { const block = codeBlock(el); if (block.code.trim()) addBlock(block); return; }
-    if (tag === 'table') { const block = tableBlock(el); if (block) addBlock(block); return; }
+    if (isRowCard(el)) { const block = cardBlock(el); if (block) { addBlock(block); addShot(el, 'card'); } return; }
+    if (tag === 'table') { const block = tableBlock(el); if (block) { addBlock(block); addShot(el, 'table'); } return; }
     if (tag === 'hr') addMarkdown('---');
     else if (tag === 'ul' || tag === 'ol') addList(el);
     else if (tag === 'blockquote') {
@@ -296,11 +322,15 @@ const rawBlock = z.discriminatedUnion('type', [
   z.object({ type: z.literal('asset'), id: z.number() }),
 ]);
 
-/** What chatgptExtractionScript returns: display-ordered blocks where images and files are still unfetched `asset` placeholders. */
+/**
+ * What chatgptExtractionScript returns: display-ordered blocks where images and files are still unfetched `asset` placeholders, and `shots`, the
+ * tables and cards on the page (stamped `data-wab-shot`) that the adapter may screenshot, each pointing at its `table` block by index.
+ */
 export const extraction = z.object({
   url: z.string(),
   text: z.string(),
   blocks: z.array(rawBlock),
   assets: z.array(z.object({ id: z.number(), kind: z.enum(['image', 'file']), name: z.string() })),
+  shots: z.array(z.object({ id: z.number(), kind: z.enum(['table', 'card']), block: z.number() })).default([]),
 });
 export type Extraction = z.infer<typeof extraction>;

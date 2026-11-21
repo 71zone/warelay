@@ -177,3 +177,43 @@ test('a split inside a fenced code block reopens the fence in the next message',
     assert.equal(chunk.split('\n').filter(line => line === '```').length % 2, 0);
   }
 });
+
+const picture = (name: string): Attachment => ({ kind: 'image', path: `/tmp/${name}`, fileName: name, mimeType: 'image/png' });
+// The comparison table ChatGPT drew in the STAR interview reply: two columns of long sentences, five rows. It does not fit a phone grid but has under 9 rows.
+const comparison: Extract<ReplyBlock, { type: 'table' }> = {
+  type: 'table',
+  header: ['Typical TL answer', 'Stronger Senior TL answer'],
+  rows: [
+    ['"I coached the underperforming agents."', '"I analyzed performance patterns to identify whether the issue was individual or systemic before deciding on the intervention."'],
+    ['"I escalated the issue to QA."', '"I collaborated with QA to identify the root cause, agree on corrective actions, and prevent recurrence."'],
+  ],
+};
+
+test('a table that arrives with a picture is sent as that native image alone, with no grid, records or CSV', () => {
+  const rows = Array.from({ length: 16 }, (_, index) => [`Country ${index}`, 'Capital', 'A notable fact of about fifteen words for this country row']);
+  const big: ReplyBlock = { type: 'table', header: ['Country', 'Capital', 'Notable fact'], rows, images: [picture('table.png')] };
+  assert.deepEqual(planReply([big]), [{ kind: 'media', attachment: picture('table.png') }]);
+  assert.deepEqual(planReply([{ ...comparison, images: [picture('wide.png')] }]), [{ kind: 'media', attachment: picture('wide.png') }]);
+});
+
+test('a tall table delivered in slices sends every picture in order, between the prose around it', () => {
+  const messages = planReply([
+    { type: 'markdown', text: 'Before' },
+    { ...comparison, images: [picture('table-1.png'), picture('table-2.png'), picture('table-3.png')] },
+    { type: 'markdown', text: 'After' },
+  ]);
+  assert.deepEqual(messages.map(message => message.kind === 'media' ? message.attachment.fileName : message.kind === 'text' ? message.text : message.kind), ['Before', 'table-1.png', 'table-2.png', 'table-3.png', 'After']);
+});
+
+test('a card of rows without header text falls back to records when no picture could be taken, and a small one to a headerless grid', () => {
+  const card: ReplyBlock = { type: 'table', header: [], rows: [['S', 'Situation — 15%\nWhat was it?'], ['T', 'Task — 10%'], ['A', 'Action']] };
+  assert.deepEqual(planReply([card]), [{ kind: 'text', text: '```\nS | Situation — 15% What was it?\nT | Task — 10%\nA | Action\n```' }]);
+  const long: ReplyBlock = { type: 'table', header: [], rows: [['S', 'Situation — 15%\nWhat was the problem? Explain the operational context and its impact on agents or business performance.']] };
+  assert.deepEqual(planReply([long]), [{ kind: 'text', text: '*S*\nSituation — 15% What was the problem? Explain the operational context and its impact on agents or business performance.' }]);
+});
+
+test('without a picture a table that does not fit the grid still falls back to records, and a small one stays a copyable grid', () => {
+  const [records] = planReply([comparison]);
+  assert.ok(records?.kind === 'text' && records.text.startsWith('*"I coached the underperforming agents."*\nStronger Senior TL answer: '));
+  assert.deepEqual(planReply([{ type: 'table', header: ['k', 'v'], rows: [['a', '1'], ['b', '2']], images: [] }]), [{ kind: 'text', text: '```\nk | v\n--+--\na | 1\nb | 2\n```' }]);
+});

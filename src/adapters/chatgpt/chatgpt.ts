@@ -44,9 +44,9 @@ export function createChatGPT(options: { endpoint: string; logger: Logger; media
   let lastRevealFailure = '';
   const catalog = new SingleFlight<Project[]>();
 
-  async function run(code: string): Promise<unknown> {
+  async function run(code: string, maxChars?: number): Promise<unknown> {
     if (!client) throw new Error('BrowserOS is not connected.');
-    const result = await runScript({ client, runName }, code, session);
+    const result = await runScript({ client, runName }, code, session, undefined, maxChars);
     session = result.session;
     return result.value;
   }

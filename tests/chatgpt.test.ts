@@ -81,6 +81,8 @@ interface Rich {
   replyText: string | null; media: boolean;
   /** What the extraction script returns; an Error makes it throw. */
   extraction: unknown; assets: Map<number, FakeAsset>; released: number[];
+  /** Table screenshots: the PNG the page's compositor returns (or a failure), how many captures ran, and the result size cap each capture script asked BrowserOS for. */
+  shot: { png: Buffer; fails: boolean; captured: number; resultLimits: number[] };
 }
 interface State {
   initializations: number; submissions: number; disconnectOnSubmit: boolean; expireAfterSubmit: boolean; complete: boolean; initialTurns: number;
@@ -102,14 +104,14 @@ async function withServer(run: (fixture: Fixture) => Promise<void>): Promise<voi
     navigations: [], waits: [], submittedAt: [], conversations: 0, blockSidebarReads: false, blocked: 0, blockedClosed: 0, projects: new Set([projectA, projectB]), redirects: new Map(), slugConversations: false, driftAfterInspect: null, driftOnObserve: null,
     virtualization: { vanishAfterReveals: null, reveals: 0, hidden: false },
     sidebar: { projects: [], limit: null, revealed: false, collapsed: false, signedOut: false, hydrateAfter: 0, reads: 0, explorerCount: null, chatMoreClicks: 0, recentsMoreClicks: 0, toggles: 0, signOutOnToggle: false },
-    rich: { events: [], uploads: [], staged: 0, uploadPolls: 0, uploadFails: false, menuOpen: false, composerPolls: 0, dropAfterPolls: null, replyText: null, media: false, extraction: null, assets: new Map(), released: [] },
+    rich: { events: [], uploads: [], staged: 0, uploadPolls: 0, uploadFails: false, menuOpen: false, composerPolls: 0, dropAfterPolls: null, replyText: null, media: false, extraction: null, assets: new Map(), released: [], shot: { png: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7]), fails: false, captured: 0, resultLimits: [] } },
   };
   const sessions = new Set<string>();
   const counts = new Map<string, number>();
   const landing = /^(https:\/\/chatgpt\.com\/g\/g-p-[0-9a-f]{32})(?:-[a-z]+)?\/project$/;
   let nextPage = 0;
   let disconnectCurrent = (): void => {};
-  const pages = new Map<number, { id: number; owner: string; groupId: string; readonly url: string; move(url: string): void; goto(url: string): Promise<void>; waitForSelector(selector: string, options?: unknown): Promise<void>; snapshot(): Promise<unknown>; fill(ref: string, value: string): Promise<void>; click(ref: string): Promise<unknown>; upload(ref: string | null, files: string[]): Promise<unknown>; evaluateInPage(fn: unknown, target?: unknown): Promise<unknown>; close(): Promise<void> }>();
+  const pages = new Map<number, { id: number; owner: string; groupId: string; readonly url: string; move(url: string): void; goto(url: string): Promise<void>; waitForSelector(selector: string, options?: unknown): Promise<void>; snapshot(): Promise<unknown>; fill(ref: string, value: string): Promise<void>; click(ref: string): Promise<unknown>; upload(ref: string | null, files: string[]): Promise<unknown>; evaluateInPage(fn: unknown, target?: unknown): Promise<unknown>; cdp(method: string, params: string): Promise<unknown>; close(): Promise<void> }>();
   // What ChatGPT does with a navigation: canonicalize project landings, send missing projects home, or follow a scripted redirect.
   const resolve = (target: string): string => {
     const scripted = state.redirects.get(target);
@@ -166,6 +168,10 @@ async function withServer(run: (fixture: Fixture) => Promise<void>): Promise<voi
           if (state.rich.extraction instanceof Error) throw state.rich.extraction;
           return { value: state.rich.extraction };
         }
+        if (source.includes('data-wab-shot')) {
+          // The measuring script gets the element id, the placing script an object.
+          return { value: typeof argument === 'number' ? { width: 700, height: 400, cuts: [400], clipped: false, viewportWidth: 1200, viewportHeight: 1000 } : { x: 100, y: 1080, width: 700 } };
+        }
         if (source.includes('data-wab-asset')) return { value: stageFakeAsset(state.rich, Number(argument)) };
         if (source.includes('arrayBuffer')) return { value: readFakeChunk(state.rich, argument) };
         if (source.includes('__wabAssets')) { state.rich.released.push(Number(argument)); return { value: true }; }
@@ -182,6 +188,12 @@ async function withServer(run: (fixture: Fixture) => Promise<void>): Promise<voi
         const value = { url, users: Math.min(count, 5), assistants: Math.min(state.complete ? count : Math.max(0, count - 1), 5), userId: matched ? userId : null, assistantId: matched && count && state.complete ? `assistant-${count}` : null, text: matched && state.complete && count ? text : '', complete: matched && state.complete, busy: !state.complete && count > 0, error: null, media: state.rich.media };
         if (state.driftAfterInspect) { url = state.driftAfterInspect; state.driftAfterInspect = null; }
         return { value: state.virtualization.hidden ? { ...value, userId: null, assistantId: null, text: '', complete: false, busy: false } : value };
+      },
+      cdp: async (method: string, params: string) => {
+        if (method !== 'Page.captureScreenshot' || JSON.parse(params).format !== 'png') throw new Error('Unexpected CDP call');
+        if (state.rich.shot.fails) throw new Error('native_feature_unavailable');
+        state.rich.shot.captured++;
+        return { data: state.rich.shot.png.toString('base64') };
       },
       close: async () => { pages.delete(id); },
     };
@@ -216,6 +228,7 @@ async function withServer(run: (fixture: Fixture) => Promise<void>): Promise<voi
         } else {
           const code = rpc.params?.arguments?.code;
           if (!code) throw new Error('Missing script');
+          if (code.includes('Page.captureScreenshot')) state.rich.shot.resultLimits.push(z.number().parse(rpc.params?.arguments?.maxChars));
           if (state.blockSidebarReads && code.includes('data-app-action-sidebar-project-id')) {
             state.blocked++;
             response.once('close', () => { state.blockedClosed++; });
@@ -1008,6 +1021,53 @@ test('a reply whose structured read lost most of its text is delivered as its pl
       assert.equal(attachmentOf(blocks[1]).fileName, 'notes.txt');
       assert.equal(blocks.length, 2);
       assert.ok(logs.some(line => /lost content/.test(line)));
+    } finally { await browser.stop().catch(() => undefined); }
+  });
+});
+
+// The STAR interview reply: a bordered card of S/T/A/R rows and a comparison table whose cells do not fit a phone grid.
+const starCard = { type: 'table', header: [], rows: [['S', 'Situation — 15%\nWhat was the problem?'], ['T', 'Task — 10%\nWhat were you responsible for?'], ['A', 'Action — 55%\nWhat did you do?'], ['R', 'Result — 20%\nWhat improved?']] };
+const starComparison = { type: 'table', header: ['Typical TL answer', 'Stronger Senior TL answer'], rows: [['"I coached the underperforming agents."', '"I analyzed performance patterns to identify whether the issue was individual or systemic."']] };
+const starReply = {
+  url: 'https://chatgpt.com/c/existing', text: 'Completed response',
+  blocks: [{ type: 'markdown', text: 'Intro' }, starCard, { type: 'markdown', text: 'Between' }, starComparison, { type: 'table', header: ['k', 'v'], rows: [['a', '1']] }],
+  assets: [], shots: [{ id: 1, kind: 'card', block: 1 }, { id: 2, kind: 'table', block: 3 }, { id: 3, kind: 'table', block: 4 }],
+};
+
+test('a card and a table too big for a phone grid come back with PNG pictures of themselves; a small table does not', async () => {
+  await withServer(async fixture => {
+    const browser = createChatGPT({ endpoint: fixture.endpoint, logger: () => {}, media });
+    const rich = fixture.state.rich;
+    rich.extraction = starReply;
+    try {
+      await browser.start();
+      const reply = await browser.reply({ conversationRef: 'https://chatgpt.com/c/existing', projectRef: null, text: 'STAR?', ...quiet });
+      const blocks = reply.blocks ?? [];
+      assert.deepEqual(blocks.map(block => block.type), ['markdown', 'table', 'markdown', 'table', 'table']);
+      const pictures = blocks.map(block => block.type === 'table' ? block.images ?? [] : []);
+      assert.deepEqual(pictures.map(images => images.length), [0, 1, 0, 1, 0]);
+      const [picture] = pictures[1] ?? [];
+      assert.deepEqual({ kind: picture?.kind, fileName: picture?.fileName, mimeType: picture?.mimeType }, { kind: 'image', fileName: 'table.png', mimeType: 'image/png' });
+      assert.ok(picture?.path.startsWith(mediaDirectory));
+      assert.deepEqual(await readFile(picture?.path ?? ''), rich.shot.png);
+      assert.deepEqual(blocks[1], { ...starCard, images: pictures[1] });
+      assert.equal(rich.shot.captured, 2);
+      assert.deepEqual(rich.shot.resultLimits, [2_000_000, 2_000_000]);
+    } finally { await browser.stop().catch(() => undefined); }
+  });
+});
+
+test('when the browser cannot take the picture the tables stay as text and the reply is still delivered', async () => {
+  await withServer(async fixture => {
+    const logs: string[] = [];
+    const browser = createChatGPT({ endpoint: fixture.endpoint, logger: message => { logs.push(message); }, media });
+    const rich = fixture.state.rich;
+    rich.extraction = starReply; rich.shot.fails = true;
+    try {
+      await browser.start();
+      const reply = await browser.reply({ conversationRef: 'https://chatgpt.com/c/existing', projectRef: null, text: 'STAR?', ...quiet });
+      assert.deepEqual(reply.blocks, [{ type: 'markdown', text: 'Intro' }, starCard, { type: 'markdown', text: 'Between' }, starComparison, { type: 'table', header: ['k', 'v'], rows: [['a', '1']] }]);
+      assert.equal(logs.filter(line => /Could not take a picture of a table.*native_feature_unavailable/.test(line)).length, 2);
     } finally { await browser.stop().catch(() => undefined); }
   });
 });
