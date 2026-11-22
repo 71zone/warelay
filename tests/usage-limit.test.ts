@@ -40,6 +40,13 @@ test('recognises limit notices and not ordinary replies', () => {
   for (const text of ['Here is a table of rate limiting strategies', 'The speed limit is 50', 'Sure, try again with a smaller file']) assert.ok(!isUsageLimitText(text), text);
 });
 
+test('recognises Gemini limit notices (wording read from gemini.google.com) and not its ordinary text', () => {
+  for (const text of ["You've reached your Deep Research limit", 'You can use it again when your limit resets on Nov 28 at 3:45 PM.', "You've hit your limit on Thinking", "You've reached your daily limit for Gemini 3 Pro. Try again after 3:45 PM"]) assert.ok(isUsageLimitText(text), text);
+  for (const text of ['Gemini is AI and can make mistakes.', 'Upgrade for higher limits', 'I encountered an error doing what you asked. Could you try again?']) assert.ok(!isUsageLimitText(text), text);
+  assert.equal(parseResetAt('You can use it again when your limit resets on Nov 28 at 3:45 PM.', now), at(10, 28, 15, 45));
+  assert.equal(parseResetAt("You've reached your Deep Research limit", now), null);
+});
+
 test('provider order input', () => {
   assert.deepEqual(parseProviderOrder('claude, chatgpt'), ['claude', 'chatgpt']);
   assert.deepEqual(parseProviderOrder('ChatGPT'), ['chatgpt']);

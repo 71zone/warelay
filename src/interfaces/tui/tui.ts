@@ -2,20 +2,21 @@ import blessed from 'blessed';
 import type { Application } from '../../core/application.js';
 import type { Contact } from '../../core/contracts.js';
 import { formatConversationTtl, parseConversationTtl } from '../../core/duration.js';
-import { parseProviderOrder, providerName, providerOptionSpecs, MAX_RETRIES_BEFORE_FALLBACK } from '../../core/providers.js';
+import { providerName } from '../../core/providers.js';
 import { DEFAULT_CONVERSATION_TTL_MINUTES, currentSlot } from '../../core/state.js';
 import type { Route } from '../../core/state.js';
-import { createProjectPicker } from './project-picker.js';
+import { createAssistantSettings } from './assistant-settings.js';
+import { createProjectPicker, type PickerHooks } from './project-picker.js';
 import { clean, errorMessage, renderQr } from './text.js';
 
 /** A contact's lifecycle for display: the project on the primary assistant (`order[0]`) and the saved conversation on the first assistant that holds one. */
-function lifecycle(route: Route | undefined, order: readonly string[]): { project: string | null; ttl: number | null; conversation: string | null; provider: string; startedAt: number | null; expiresAt: number | null; expired: boolean } {
+function lifecycle(route: Route | undefined, order: readonly string[]): { ttl: number | null; conversation: string | null; provider: string; startedAt: number | null; expiresAt: number | null; expired: boolean } {
   const ttl = route ? route.conversationTtlMinutes : DEFAULT_CONVERSATION_TTL_MINUTES;
   const held = route ? currentSlot(route, order) : null;
   const conversation = held?.slot.conversationRef ?? null;
   const startedAt = held?.slot.startedAt ?? null;
   const expiresAt = conversation && ttl !== null && startedAt !== null ? startedAt + ttl * 60_000 : null;
-  return { project: route?.refs[order[0] ?? '']?.projectRef ?? null, ttl, conversation, provider: held?.provider ?? '', startedAt, expiresAt, expired: expiresAt !== null && Date.now() >= expiresAt };
+  return { ttl, conversation, provider: held?.provider ?? '', startedAt, expiresAt, expired: expiresAt !== null && Date.now() >= expiresAt };
 }
 const clockTime = (time: number): string => new Date(time).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 
@@ -51,7 +52,7 @@ export async function runTui(application: Application, options: { canRestart?: b
   let activePanel: 'directory' | 'sessions' = 'directory';
   let rendering = false;
   let scheduled: NodeJS.Immediate | null = null;
-  const picker = createProjectPicker(screen, application, {
+  const overlayHooks = (other: () => boolean): PickerHooks => ({
     opened: () => { modalActive = true; },
     closed: () => {
       if (closing) return;
@@ -59,8 +60,10 @@ export async function runTui(application: Application, options: { canRestart?: b
       if (qr.hidden) (activePanel === 'sessions' ? routesList : list).focus();
       refresh();
     },
-    blocked: () => closing || !qr.hidden,
-  }, frame);
+    blocked: () => closing || !qr.hidden || other(),
+  });
+  const picker = createProjectPicker(screen, application, overlayHooks(() => assistants.isOpen()), frame);
+  const assistants = createAssistantSettings(screen, application, overlayHooks(() => picker.isOpen()), frame);
 
   function attempt(action: () => unknown): void {
     if (closing) return;
@@ -93,29 +96,7 @@ export async function runTui(application: Application, options: { canRestart?: b
     if (!contact) { application.log('Select a contact or saved session first, then press G.'); return; }
     picker.open(contact);
   }
-  function setAssistants(): void {
-    const current = application.snapshot().assistant;
-    showPrompt('Assistants in priority order, first = primary (chatgpt, claude). One name = no fallback.\nThe next one takes over when the first reports a usage limit, until its reset time.', current.providers.join(', '), order => {
-      let providers: string[];
-      try { providers = parseProviderOrder(order); } catch (error) { application.log(errorMessage(error)); return; }
-      showPrompt(`Retries before falling back to the next assistant, when a message provably did not leave (0-${MAX_RETRIES_BEFORE_FALLBACK}):`, String(current.retriesBeforeFallback), value => {
-        const retries = Number(value.trim());
-        if (!value.trim() || !Number.isInteger(retries)) { application.log('Retries must be a whole number.'); return; }
-        // Then each chosen provider's own declared options (none for ChatGPT or Claude today), one prompt each; empty keeps the provider default.
-        const asks = providers.flatMap(provider => providerOptionSpecs(provider).map(spec => ({ provider, spec })));
-        const options: Record<string, Record<string, string>> = {};
-        const next = (index: number): void => {
-          const ask = asks[index];
-          if (!ask) { attempt(() => application.setAssistantSettings({ providers, retriesBeforeFallback: retries, options })); return; }
-          showPrompt(`${providerName(ask.provider)}: ${ask.spec.label} (empty = default):`, current.options[ask.provider]?.[ask.spec.key] ?? '', answer => {
-            if (answer.trim()) (options[ask.provider] ??= {})[ask.spec.key] = answer.trim();
-            next(index + 1);
-          });
-        };
-        next(0);
-      });
-    });
-  }
+  function setAssistants(): void { assistants.open(); }
   function setTtl(): void {
     const contact = selected();
     if (!contact) { application.log('Select a contact or saved session first, then press T.'); return; }
@@ -133,7 +114,7 @@ export async function runTui(application: Application, options: { canRestart?: b
   }
   async function shutdown(restart = false): Promise<void> {
     if (closing) return;
-    closing = true; picker.close();
+    closing = true; picker.close(); assistants.close();
     if (restart) outcome = 'restart';
     application.log(restart
       ? 'Restarting. Waiting for any in-progress reply to finish, then relaunching; enabled sessions resume on their own…'
@@ -174,13 +155,13 @@ export async function runTui(application: Application, options: { canRestart?: b
     const data = application.snapshot();
     const contact = selected();
     if (!contact) {
-      details.setContent(`Choose a saved contact or recent chat.\nSpace enables automatic forwarding.\nG sets its ${clean(application.assistantName())} project; T sets chat lifetime.\nA adds a contact if it is not in the list.\nConfiguring G/T never enables forwarding.`);
+      details.setContent(`Choose a saved contact or recent chat.\nSpace enables automatic forwarding.\nG sets its project per assistant (◀ ▶ switches); T sets chat lifetime.\nA adds a contact if it is not in the list.\nConfiguring G/T never enables forwarding.`);
     } else {
       const route = data.routes.find(item => item.contactId === contact.id);
       const chat = data.chats.find(item => item.id === contact.id);
       const life = lifecycle(route, data.assistant.providers);
       const state = route?.error ? '{red-fg}Paused after an error{/}' : route?.enabled ? '{green-fg}Enabled{/}' : '{yellow-fg}Not forwarding{/}';
-      const project = life.project ? `Project: ${clean(life.project)}` : 'Project: none · standalone chats';
+      const projects = data.assistant.providers.map(id => `Project (${clean(providerName(id))}): ${application.projectRef(route, id) ? clean(application.projectRef(route, id) ?? '') : 'none · standalone chats'}`);
       const ttl = `Lifetime: ${life.ttl === null ? 'never expires' : `${formatConversationTtl(life.ttl)} fixed from first chat reference`}`;
       const expiry = !life.conversation ? 'Chat: new one starts on next message'
         : life.expired ? `{yellow-fg}Chat: expired ${clean(new Date(life.expiresAt ?? 0).toLocaleString())} · next message starts a new chat{/}`
@@ -192,7 +173,7 @@ export async function runTui(application: Application, options: { canRestart?: b
         clean(contact.id),
         `${state}${route?.enabled && !data.armed ? ' · globally paused' : ''}`,
         ...(route?.error ? [`{red-fg}${clean(route.error)}{/}`] : []),
-        project, ttl, expiry,
+        ...projects, ttl, expiry,
         ...(life.conversation ? [`Chat (${clean(providerName(life.provider))}): ${clean(life.conversation)}`] : []),
         ...(chat?.lastMessageAt ? [`Last activity: ${clean(new Date(chat.lastMessageAt * 1000).toLocaleString())}`] : []),
       ].join('\n'));
@@ -231,7 +212,7 @@ export async function runTui(application: Application, options: { canRestart?: b
       routesList.setItems(data.routes.length ? data.routes.map(route => {
         const life = lifecycle(route, data.assistant.providers);
         const chatState = !life.conversation ? 'new chat' : life.expired ? 'expired' : 'saved chat';
-        return `${mark(route.contactId)} ${label({ id: route.contactId, name: route.name })}  ↔ ${chatState} · ${life.project ? 'project' : 'no project'} · ${formatConversationTtl(life.ttl)}`;
+        return `${mark(route.contactId)} ${label({ id: route.contactId, name: route.name })}  ↔ ${chatState} · ${data.assistant.providers.map(id => `${clean(providerName(id))} ${application.projectRef(route, id) ? '✓' : '–'}`).join(' ')} · ${formatConversationTtl(life.ttl)}`;
       }) : ['{gray-fg}No sessions. Select a contact and press Space.{/}']);
       routeIndex = Math.min(routeIndex, Math.max(0, data.routes.length - 1)); routesList.select(routeIndex);
       const forwarding = data.armed ? '{green-fg}ACTIVE{/}' : '{yellow-fg}PAUSED{/}';
@@ -249,7 +230,7 @@ export async function runTui(application: Application, options: { canRestart?: b
   function onLog(message: string): void {
     activity.log(`{gray-fg}${new Date().toLocaleTimeString()}{/} ${clean(message)}`); schedule();
   }
-  function hideQr(): void { qr.hide(); modalActive = picker.isOpen(); if (modalActive) picker.focus(); else list.focus(); }
+  function hideQr(): void { qr.hide(); modalActive = picker.isOpen() || assistants.isOpen(); if (picker.isOpen()) picker.focus(); else if (assistants.isOpen()) assistants.focus(); else list.focus(); }
   function onQr(payload: string): void {
     if (!payload) hideQr();
     else {
@@ -273,20 +254,20 @@ export async function runTui(application: Application, options: { canRestart?: b
     details.top = 10 + sessionHeight; details.height = detailHeight;
     activity.top = 10 + sessionHeight + detailHeight; activity.height = Math.max(4, available - sessionHeight - detailHeight);
     renderHeader();
-    refresh(); picker.layout();
+    refresh(); picker.layout(); assistants.layout();
   }
   list.on('select item', (_item: unknown, index: number) => {
-    if (picker.isOpen()) return;
+    if (picker.isOpen() || assistants.isOpen()) return;
     directoryIndex = index;
     if (!rendering) { activePanel = 'directory'; refreshDetails(); screen.render(); }
   });
   routesList.on('select item', (_item: unknown, index: number) => {
-    if (picker.isOpen()) return;
+    if (picker.isOpen() || assistants.isOpen()) return;
     routeIndex = index;
     if (!rendering) { activePanel = 'sessions'; refreshDetails(); screen.render(); }
   });
-  list.on('focus', () => { if (picker.isOpen()) { picker.focus(); return; } activePanel = 'directory'; refreshDetails(); screen.render(); });
-  routesList.on('focus', () => { if (picker.isOpen()) { picker.focus(); return; } activePanel = 'sessions'; refreshDetails(); screen.render(); });
+  list.on('focus', () => { if (assistants.isOpen()) { assistants.focus(); return; } if (picker.isOpen()) { picker.focus(); return; } activePanel = 'directory'; refreshDetails(); screen.render(); });
+  routesList.on('focus', () => { if (assistants.isOpen()) { assistants.focus(); return; } if (picker.isOpen()) { picker.focus(); return; } activePanel = 'sessions'; refreshDetails(); screen.render(); });
   const bind = (keys: string[], action: () => Promise<void> | void): void => {
     screen.key(keys, () => { if (!modalActive) attempt(action); });
   };

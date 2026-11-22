@@ -66,7 +66,8 @@ const noBody = z.strictObject({});
 const loginBody = z.strictObject({ token: z.string().min(1).max(256) });
 const addBody = z.strictObject({ input: z.string().trim().min(1).max(128) });
 const enabledBody = z.strictObject({ contactId, enabled: z.boolean() });
-const projectBody = z.strictObject({ contactId, projectRef: z.string().min(1).max(2048).nullable() });
+const providerId = z.string().min(1).max(32);
+const projectBody = z.strictObject({ contactId, projectRef: z.string().min(1).max(2048).nullable(), provider: providerId.optional() });
 const ttlBody = z.strictObject({ contactId, ttl: z.string().max(32) });
 
 class HttpError extends Error {
@@ -236,7 +237,7 @@ export async function startHttpServer({ application, settings, limits: overrides
     response.end(request.method === 'HEAD' ? undefined : asset.body);
   }
 
-  async function api(request: IncomingMessage, response: ServerResponse, path: string, origin: RequestOrigin): Promise<void> {
+  async function api(request: IncomingMessage, response: ServerResponse, path: string, origin: RequestOrigin, query: URLSearchParams): Promise<void> {
     if (crossOrigin(request, origin)) throw new HttpError(403, 'cross_origin', 'Cross-origin requests are not allowed.');
     const method = request.method ?? 'GET';
     const get = (): void => { if (method !== 'GET') throw new HttpError(405, 'method_not_allowed', 'Method not allowed.', { Allow: 'GET' }); };
@@ -275,7 +276,9 @@ export async function startHttpServer({ application, settings, limits: overrides
       case '/api/events': get(); openStream(request, response, authorized(false)); return;
       case '/api/projects': {
         get(); authorized(false);
-        try { sendJson(response, 200, { projects: await buildProjects(application) }); }
+        const provider = query.get('provider') ?? undefined;
+        if (provider !== undefined && !application.snapshot().assistant.providers.includes(provider)) throw new HttpError(400, 'bad_request', 'That assistant is not enabled.');
+        try { sendJson(response, 200, { projects: await buildProjects(application, provider) }); }
         catch (error) { throw new HttpError(502, 'projects_unavailable', publicMessage(error, 'The project list could not be read. Check the browser connection.')); }
         return;
       }
@@ -306,7 +309,8 @@ export async function startHttpServer({ application, settings, limits: overrides
         post(); authorized(true);
         const body = await parse(request, projectBody);
         const contact = findContact(body.contactId);
-        return run(response, 409, 'The project could not be assigned.', () => application.setProject(contact, body.projectRef));
+        if (body.provider !== undefined && !application.snapshot().assistant.providers.includes(body.provider)) throw new HttpError(400, 'bad_request', 'That assistant is not enabled.');
+        return run(response, 409, 'The project could not be assigned.', () => application.setProject(contact, body.projectRef, body.provider));
       }
       case '/api/contacts/ttl': {
         post(); authorized(true);
@@ -328,7 +332,7 @@ export async function startHttpServer({ application, settings, limits: overrides
         if (!origin) throw new HttpError(421, 'unexpected_host', 'This Host is not accepted by the server.');
         const target = request.url && /^\/(?![/\\])/.test(request.url) ? new URL(request.url, origin.origin) : null;
         if (!target) throw new HttpError(400, 'bad_request', 'Bad request.');
-        if (target.pathname.startsWith('/api/')) await api(request, response, target.pathname, origin);
+        if (target.pathname.startsWith('/api/')) await api(request, response, target.pathname, origin, target.searchParams);
         else serveAsset(request, response, target.pathname);
       } catch (error) {
         if (error instanceof HttpError) {

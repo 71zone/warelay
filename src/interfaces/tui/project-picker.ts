@@ -154,9 +154,17 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
       const width = innerWidth - 2;
       const current = currentRef(s.target);
       const currentName = current === null ? 'none' : (s.catalog.find(project => project.ref === current)?.name ?? current);
+      const order = application.snapshot().assistant.providers;
+      const route = application.snapshot().routes.find(item => item.contactId === s.target.id);
+      const tabs = order.map(id => {
+        const mark = application.projectRef(route, id) !== null ? ' ●' : '';
+        const text = `${plain(providerName(id))}${mark}`;
+        return id === provider ? `{inverse} ${blessed.escape(text)} {/inverse}` : ` ${blessed.escape(text)} `;
+      }).join('');
+      const tabHint = order.length > 1 ? '  {gray-fg}◀ ▶ or F6: other assistant · ● has a project{/}' : '';
       const title = fit(`Project for ${plain(s.target.name) || s.target.id} · now: ${plain(currentName)}`, innerWidth);
-      const warning = wrap(`Use a project set to project-only memory in ${assistant}. Choosing another one starts a new chat on the next message; the old chat is kept. Saving never enables forwarding.`, innerWidth, 2);
-      header.setContent([`{bold}${blessed.escape(title)}{/bold}`, ...warning.map(line => `{yellow-fg}${blessed.escape(line)}{/}`)].join('\n'));
+      const warning = wrap(`Use a project set to project-only memory in ${assistant}. Choosing another one starts a new chat on the next message; the old chat is kept. Saving never enables forwarding.`, innerWidth, 1);
+      header.setContent([`${tabs}${tabHint}`, `{bold}${blessed.escape(title)}{/bold}`, ...warning.map(line => `{yellow-fg}${blessed.escape(line)}{/}`)].join('\n'));
       const shownQuery = fit(s.query.length > 0 ? [...s.query].slice(-Math.max(1, innerWidth - 14)).join('') : '', innerWidth - 14);
       const caret = s.mode === 'search' ? '{inverse} {/inverse}' : '';
       search.setContent(`${s.mode === 'search' ? '{cyan-fg}{bold}Search:{/bold}{/} ' : '{gray-fg}Search:{/} '}${blessed.escape(shownQuery)}${caret}${!s.query && s.mode !== 'search' ? '{gray-fg}/ to type{/}' : ''}`);
@@ -175,8 +183,8 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
       list.setItems(items);
       list.select(index);
       hint.setContent(`{gray-fg}${blessed.escape(fit(s.mode === 'search'
-        ? 'Type to filter · ↑↓ move · Enter assign · Tab list keys · F5 refresh · F6 other assistant · Esc cancel'
-        : '↑↓/J/K move · Enter assign · / search · R refresh · P other assistant · C no project · Esc cancel', innerWidth))}{/}`);
+        ? 'Type to filter · ↑↓ move · Enter assign · Tab list keys · F5 refresh · ◀ ▶ assistant · Esc cancel'
+        : '↑↓/J/K move · Enter assign · / search · R refresh · ◀ ▶/P assistant · C no project · Esc cancel', innerWidth))}{/}`);
       screen.render();
     } finally { rendering = false; }
   }
@@ -199,11 +207,11 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
     load(state);
   }
   /** Switches to the next configured assistant's projects; the contact's project on each is independent. */
-  function nextProvider(): void {
+  function nextProvider(step: number): void {
     if (!state || state.busy) return;
     const order = application.snapshot().assistant.providers;
-    if (order.length < 2) { state.notice = 'Only one assistant is configured (O sets the order).'; render(); return; }
-    useProvider(order[(order.indexOf(provider) + 1) % order.length] ?? provider);
+    if (order.length < 2) { state.notice = 'Only one assistant is enabled (O chooses the assistants).'; render(); return; }
+    useProvider(order[(order.indexOf(provider) + step + order.length) % order.length] ?? provider);
     state.selected = currentRef(state.target); state.query = '';
     load(state);
   }
@@ -258,7 +266,8 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
     switch (key.full) {
       case 'escape': close(); return;
       case 'f5': case 'C-r': refresh(); return;
-      case 'f6': nextProvider(); return;
+      case 'f6': case 'right': nextProvider(1); return;
+      case 'left': nextProvider(-1); return;
       case 'enter': assign(); return;
       case 'up': move(-1); return;
       case 'down': move(1); return;
@@ -274,7 +283,7 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
       else if (ch === 'k') move(-1);
       else if (ch === 'r' || ch === 'R') refresh();
       else if (ch === 'c' || ch === 'C') { s.selected = ''; render(); }
-      else if (ch === 'p' || ch === 'P') nextProvider();
+      else if (ch === 'p' || ch === 'P') nextProvider(1);
       else if (ch === '/') { s.mode = 'search'; render(); }
       else render();
       return;

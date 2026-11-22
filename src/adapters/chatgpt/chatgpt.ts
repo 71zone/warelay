@@ -9,7 +9,7 @@ import { chatgptReferences, destinationPathPattern, isConversationPage, isDestin
 const driver: AssistantDriver = {
   id: 'chatgpt',
   name: 'ChatGPT',
-  home: 'https://chatgpt.com/',
+  home: () => 'https://chatgpt.com/',
   references: chatgptReferences,
   composerReady,
   settle: settleScript,

@@ -1,6 +1,7 @@
 /**
  * Source of the regular expression the page scripts use to recognise a provider's usage-limit notice. It is embedded in browser scripts, so it must stay a
  * single self-contained pattern. Matches ChatGPT ("You've reached the current usage cap", "You've hit the usage limit", "try again after 3:45 PM") and
+ * Gemini ("You've reached your Deep Research limit", "You can use it again when your limit resets on Nov 28 at 3:45 PM") and
  * Claude ("You've reached your usage limit", "5-hour limit reached", "You are out of free messages until 3 PM", "Your limit will reset at 3 PM").
  */
 export const usageLimitSource = String.raw`(?:(?:reached|hit|exceeded|used up)\b[^.\n]{0,60}\b(?:usage|message|messages|rate|plan|daily|weekly|hourly|\d+-hour|free)?\s*(?:limit|cap|quota)s?\b|(?:usage|message|rate|\d+-hour|weekly|daily)\s+(?:limit|cap)\s+(?:reached|hit|exceeded)|out of (?:free )?(?:messages|usage)|limit\s+(?:will\s+)?reset|(?:try again|come back)\s+(?:in|after|at|on|later)\b[^.\n]{0,40}\b(?:limit|usage)|(?:limit|cap)[^.\n]{0,40}\b(?:try again|resets?)\b)`;

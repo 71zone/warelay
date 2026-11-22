@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { createChatGPT } from './adapters/chatgpt/chatgpt.js';
 import { createClaude } from './adapters/claude/claude.js';
+import { createGemini } from './adapters/gemini/gemini.js';
 import { createJsonStatePersistence } from './adapters/storage/json-state.js';
 import { createWhatsApp } from './adapters/whatsapp/whatsapp.js';
 import { Application } from './core/application.js';
@@ -21,8 +22,12 @@ export async function createApplication(config: LoadedConfig, options: { notBefo
   let application: Application | undefined;
   const logger = (message: string): void => { application?.log(message); };
   const media = createMediaStore(join(config.dataDir, 'media'));
-  const adapters = [createChatGPT({ endpoint: config.browserMcpUrl, logger, media }), createClaude({ endpoint: config.browserMcpUrl, logger, media })];
-  const store = await RoutingState.load(createJsonStatePersistence(config.dataDir), Object.fromEntries(adapters.map(adapter => [adapter.id, adapter.references])));
+  // Provider options (for example Gemini's account) live in the routing state, which is loaded after the adapters exist: they read it lazily.
+  let routing: RoutingState | undefined;
+  const optionsOf = (provider: string) => (): Record<string, string> => routing?.settings().options[provider] ?? {};
+  const endpoint = config.browserMcpUrl;
+  const adapters = [createChatGPT({ endpoint, logger, media }), createClaude({ endpoint, logger, media }), createGemini({ endpoint, logger, media, options: optionsOf('gemini') })];
+  const store = routing = await RoutingState.load(createJsonStatePersistence(config.dataDir), Object.fromEntries(adapters.map(adapter => [adapter.id, adapter.references])));
   const assistant = createFallbackAssistant({ adapters, port: store, logger });
   const channel = createWhatsApp({
     authDir: join(config.dataDir, 'whatsapp'), logger, media,

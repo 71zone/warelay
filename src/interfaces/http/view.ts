@@ -25,7 +25,10 @@ export interface ContactView {
   hasRoute: boolean;
   /** Last error that paused this contact, if any. */
   error: string | null;
+  /** The project on the primary assistant. */
   projectRef: string | null;
+  /** The project on each enabled assistant, by provider id. */
+  projectRefs: Record<string, string | null>;
   ttlMinutes: number | null;
   ttl: string;
   conversation: { active: boolean; startedAt: number | null; expiresAt: number | null; expired: boolean };
@@ -71,6 +74,7 @@ export function buildState(application: Application, now = Date.now()): StateVie
       hasRoute: route !== undefined,
       error: route?.error ? publicMessage(route.error, 'Forwarding stopped.') : null,
       projectRef: route ? slotOf(route, order[0] ?? '').projectRef : null,
+      projectRefs: Object.fromEntries(order.map(id => [id, route ? slotOf(route, id).projectRef : null])),
       ttlMinutes,
       ttl: formatConversationTtl(ttlMinutes),
       conversation: { active, startedAt, expiresAt, expired: expiresAt !== null && now >= expiresAt },

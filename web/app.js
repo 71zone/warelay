@@ -15,7 +15,10 @@
   let source = null;
   let reconnectTimer = null;
   let selectedId = null;
+  /** Project catalogs by assistant id (null until read) and the assistant whose projects the select shows. */
+  const catalogs = {};
   let projects = null;
+  let projectProvider = null;
   let projectsVersion = 0;
   let projectsLoading = false;
   let projectDirty = false;
@@ -34,6 +37,7 @@
   const notice = $('notice');
   const list = $('contact-list');
   const projectSelect = $('project-select');
+  const providerSelect = $('project-provider');
   const ttlInput = $('ttl-input');
 
   function tone(element, value) { if (value) element.dataset.tone = value; else delete element.dataset.tone; }
@@ -65,7 +69,7 @@
   /* ---------- session ---------- */
 
   function showLogin(message) {
-    csrf = null; view = null; activity = []; selectedId = null; projects = null; detailFor = null; shownQr = null;
+    csrf = null; view = null; activity = []; selectedId = null; projects = null; for (const key of Object.keys(catalogs)) delete catalogs[key]; detailFor = null; shownQr = null;
     clearTimeout(reconnectTimer);
     if (source) { source.close(); source = null; }
     for (const row of rows.values()) row.li.remove();
@@ -247,18 +251,36 @@
     else { empty.hidden = visible.length > 0; empty.textContent = 'No contacts match.'; }
   }
 
+  function activeProvider() {
+    const enabled = view.assistant.providers;
+    if (!enabled.some(provider => provider.id === projectProvider)) projectProvider = enabled[0] ? enabled[0].id : null;
+    return projectProvider;
+  }
+  const projectOf = contact => (contact.projectRefs && contact.projectRefs[activeProvider()]) || null;
+
   function ownersByProject(excludeId) {
     const owners = new Map();
-    for (const contact of view.contacts) if (contact.projectRef && contact.id !== excludeId) owners.set(contact.projectRef, contact.name);
+    for (const contact of view.contacts) if (projectOf(contact) && contact.id !== excludeId) owners.set(projectOf(contact), contact.name);
     return owners;
   }
 
   function renderProjectOptions(contact) {
+    const provider = activeProvider();
+    projects = catalogs[provider] || null;
+    const current = projectOf(contact);
     const owners = ownersByProject(contact.id);
-    const signature = [contact.id, contact.projectRef, projectsVersion, [...owners].join('|')].join('\n');
+    const providers = view.assistant.providers;
+    const signature = [contact.id, provider, current, projectsVersion, providers.map(item => item.id + (contact.projectRefs[item.id] ? '*' : '')).join(','), [...owners].join('|')].join('\n');
     if (signature === projectSignature) return;
     projectSignature = signature;
-    const wanted = projectDirty ? projectSelect.value : (contact.projectRef || '');
+    providerSelect.hidden = providers.length < 2;
+    providerSelect.replaceChildren(...providers.map(item => {
+      const option = document.createElement('option');
+      option.value = item.id; option.textContent = item.name + (contact.projectRefs[item.id] ? ' ●' : '');
+      return option;
+    }));
+    providerSelect.value = provider;
+    const wanted = projectDirty ? projectSelect.value : (current || '');
     const options = [];
     const add = (value, label, disabled) => {
       const option = document.createElement('option');
@@ -269,16 +291,16 @@
     const known = projects || [];
     for (const project of known) {
       const owner = owners.get(project.ref) || (project.owner && project.owner.id !== contact.id ? project.owner.name : null);
-      if (project.ref === contact.projectRef) add(project.ref, `${project.name} (current)`);
+      if (project.ref === current) add(project.ref, `${project.name} (current)`);
       else if (owner) add(project.ref, `${project.name} — in use by ${owner}`, true);
       else add(project.ref, project.name);
     }
-    if (contact.projectRef && !known.some(project => project.ref === contact.projectRef)) add(contact.projectRef, projects ? 'Current project (not in your list)' : 'Current project');
+    if (current && !known.some(project => project.ref === current)) add(current, projects ? 'Current project (not in your list)' : 'Current project');
     projectSelect.replaceChildren(...options);
-    projectSelect.value = options.some(option => option.value === wanted && !option.disabled) ? wanted : (contact.projectRef || '');
+    projectSelect.value = options.some(option => option.value === wanted && !option.disabled) ? wanted : (current || '');
     $('project-note').textContent = projects
       ? `${projects.length} project${projects.length === 1 ? '' : 's'} loaded. Projects used by another contact are disabled. Assigning a project never enables forwarding and starts a new conversation.`
-      : `Refresh to read your ${view.app.assistantName} projects. This briefly uses a separate browser tab.`;
+      : `Refresh to read your ${providers.find(item => item.id === provider).name} projects. This briefly uses a separate browser tab.`;
   }
 
   function renderDetail() {
@@ -383,12 +405,14 @@
   });
 
   projectSelect.addEventListener('change', () => { projectDirty = true; });
+  providerSelect.addEventListener('change', () => { projectProvider = providerSelect.value; projectDirty = false; projectSignature = ''; if (view) renderAll(); });
   $('project-refresh').addEventListener('click', async () => {
     projectsLoading = true; $('project-refresh').disabled = true;
     showNotice('Reading projects…', '');
     try {
-      const result = await api('GET', '/api/projects');
-      projects = result.projects; projectsVersion++; projectSignature = '';
+      const provider = activeProvider();
+      const result = await api('GET', `/api/projects?provider=${encodeURIComponent(provider)}`);
+      catalogs[provider] = result.projects; projectsVersion++; projectSignature = '';
       showNotice('', '');
     } catch (error) { showNotice(error.message, 'bad'); }
     finally { projectsLoading = false; if (view) renderAll(); }
@@ -396,7 +420,7 @@
   $('project-save').addEventListener('click', async event => {
     const contact = contactById(selectedId);
     if (!contact) return;
-    const ok = await act(event.currentTarget, () => api('POST', '/api/contacts/project', { contactId: contact.id, projectRef: projectSelect.value || null }), `Project saved for ${contact.name}. Forwarding state is unchanged.`);
+    const ok = await act(event.currentTarget, () => api('POST', '/api/contacts/project', { contactId: contact.id, projectRef: projectSelect.value || null, provider: activeProvider() }), `Project saved for ${contact.name}. Forwarding state is unchanged.`);
     if (ok) { projectDirty = false; projectSignature = ''; if (view) renderAll(); }
   });
 

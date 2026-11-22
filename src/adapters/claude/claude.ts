@@ -9,7 +9,7 @@ import { claudeReferences, destinationPathPattern, isConversationPage, isDestina
 const driver: AssistantDriver = {
   id: 'claude',
   name: 'Claude',
-  home: 'https://claude.ai/new',
+  home: () => 'https://claude.ai/new',
   references: claudeReferences,
   composerReady,
   settle: settleScript,

@@ -13,6 +13,7 @@ export { createJsonStatePersistence } from './adapters/storage/json-state.js';
 export { createWhatsApp } from './adapters/whatsapp/whatsapp.js';
 export { createChatGPT } from './adapters/chatgpt/chatgpt.js';
 export { createClaude } from './adapters/claude/claude.js';
+export { createGemini } from './adapters/gemini/gemini.js';
 export { createApplication, openRuntime } from './bootstrap.js';
 export type { Runtime } from './bootstrap.js';
 export { defaultConfigPath, loadConfig } from './infrastructure/config.js';

@@ -12,7 +12,7 @@ description: Panels, keys, prompts, the project picker and what pausing does in 
 
 - **Status bar.** The last confirmed WhatsApp and BrowserOS connection states, whether forwarding is active, and the assistants in priority order. The one in use is green; an assistant that hit its usage limit shows `ChatGPT limited until 3:45 PM` until then.
 - **Directory.** Saved contacts and known chats. Views `1`, `2` and `3` below switch what it lists.
-- **Sessions.** Each configured contact, whether it has a saved, new or expired ChatGPT conversation, and its project and lifetime.
+- **Sessions.** Each configured contact, whether it has a saved, new or expired conversation, whether it has a project on each enabled assistant (`ChatGPT ✓ Claude –`), and its lifetime.
 - **Details.** The selected contact's JID, project, conversation lifetime, expiry time, conversation URL and any failure.
 - **Activity.** Connection changes and deliveries, without message bodies. Elapsed times for ChatGPT acceptance, reply readiness and WhatsApp delivery appear here. Dependency console output is routed into this panel, with structured objects redacted to avoid exposing session keys.
 
@@ -34,9 +34,9 @@ What each panel's data means: [Conversations](../concepts/conversations.md), [De
 | P | Pause all forwarding, retaining session selections |
 | A | Add an international phone number or a direct-contact JID |
 | B | Check that BrowserOS is reachable and a ChatGPT composer is available, without sending a prompt (a signed-out page can still show one; the project picker reports a signed-out login) |
-| G | Open the searchable project picker for the selected contact: the primary assistant's projects, P/F6 for another assistant's (see below) |
+| G | Open the searchable project picker for the selected contact. A tab strip shows every enabled assistant (`●` marks one that already has a project for this contact); Left/Right, F6 or P switch assistant, and each assistant keeps its own project (see below) |
 | T | Set the selected contact's fixed conversation lifetime: minutes, `90m`, `12h`, `3d` or `never`; empty means 24h |
-| O | Choose the assistants in priority order (`chatgpt, claude`; one name means no fallback) and the number of retries before falling back (0 to 10, default 2). Saved in `state.json`; see [Fallback assistants](../concepts/delivery.md#fallback-assistants) |
+| O | Open the Assistants screen (no typing): a checkbox per assistant with its priority position (`1. ChatGPT primary`, `2. Claude fallback 1`), Space switches it on or off (at least one stays on), Shift+Up/Down or `+`/`-` move it up or down the priority, Left/Right or `+`/`-` step the retries before falling back (0 to 10, default 2) and cycle an assistant's own options (Gemini: Google account index 0 to 3), Enter or S saves, Esc cancels. Saved in `state.json`; see [Fallback assistants](../concepts/delivery.md#fallback-assistants) |
 | X | Restart wabgpt in the same terminal. It waits for any in-progress reply to finish, releases the data-directory lock, and a fresh process starts and resumes enabled sessions without pressing R. The new process picks up a rebuilt `dist/` or a changed config. WhatsApp allows one connection per linked device, so there is a gap of a few seconds while it relaunches; messages sent during the gap are forwarded once it reconnects. A message that arrives while the old process is still finishing a reply is not forwarded. |
 | Q or Ctrl-C | Quit and retain settings |
 
@@ -53,7 +53,9 @@ Enabling a contact explicitly allows their incoming text to be shared with ChatG
 
 ## Project picker
 
-Press G to choose from your ChatGPT projects by name; you never paste a URL. The picker opens centered over the dashboard and reads the full project list live from ChatGPT through BrowserOS, in its own short-lived connection and scratch tab, so it does not touch the tab used for replies and never connects WhatsApp. It shows "Loading…" first. If ChatGPT is signed out, BrowserOS is unreachable or the list cannot be read completely, it shows the error and lets you retry instead of showing a partial or empty list. Nothing is changed or enabled while it loads.
+Press G to choose from your projects by name; you never paste a URL. The picker opens centered over the dashboard and reads the full project list live from the assistant shown in its header (ChatGPT, Claude or Gemini) through BrowserOS, in its own short-lived connection and scratch tab, so it does not touch the tab used for replies and never connects WhatsApp. It shows "Loading…" first. If the assistant is signed out, BrowserOS is unreachable or the list cannot be read completely, it shows the error and lets you retry instead of showing a partial or empty list. Nothing is changed or enabled while it loads.
+
+The header's tab strip, for example `[ ChatGPT ]  Claude  ◀ ▶ or F6: other assistant`, shows whose projects are listed. Assign a project on each assistant separately: switch tab, pick, Enter. The Selected chat panel lists `Project (ChatGPT)`, `Project (Claude)` and so on for every enabled assistant. An assistant that is switched off in the Assistants screen has no tab.
 
 | Picker key | Action |
 | --- | --- |
@@ -62,7 +64,7 @@ Press G to choose from your ChatGPT projects by name; you never paste a URL. The
 | Enter | Assign the highlighted project, or clear the project if "No project" is highlighted |
 | Tab | Switch between typing and list mode; in list mode J/K move, `/` returns to search, R refreshes and C highlights "No project" |
 | F5 or Ctrl-R | Reload the list from the current assistant (also the Refresh button) |
-| F6 or P (list mode) | Switch to the next configured assistant's projects; each assistant keeps its own project for the contact |
+| F6, Left/Right or P (list mode) | Switch to the previous or next enabled assistant's projects; each assistant keeps its own project for the contact |
 | Backspace / Ctrl-U | Edit / clear the search |
 | Esc | Cancel without changing anything |
 

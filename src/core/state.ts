@@ -222,9 +222,13 @@ export class RoutingState {
     const options: AssistantSettings['options'] = {};
     for (const [provider, values] of Object.entries(settings.options)) {
       if (!(provider in this.references)) throw new Error(`Unknown assistant "${provider}".`);
-      const declared = new Set(providerOptionSpecs(provider).map(spec => spec.key));
+      const specs = providerOptionSpecs(provider);
       const kept = Object.entries(values).filter(([, value]) => value.trim() !== '');
-      for (const [key] of kept) if (!declared.has(key)) throw new Error(`${providerName(provider)} has no option "${key}".`);
+      for (const [key, value] of kept) {
+        const spec = specs.find(item => item.key === key);
+        if (!spec) throw new Error(`${providerName(provider)} has no option "${key}".`);
+        if (!new RegExp(`^(?:${spec.pattern})$`).test(value.trim())) throw new Error(`${providerName(provider)} ${key}: ${spec.hint}`);
+      }
       if (kept.length > 0) options[provider] = Object.fromEntries(kept.map(([key, value]) => [key, value.trim()]));
     }
     this.data.settings = { providers: [...providers], retriesBeforeFallback: settings.retriesBeforeFallback, options };

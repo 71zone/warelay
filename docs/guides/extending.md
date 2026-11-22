@@ -19,6 +19,7 @@ src/adapters/
   whatsapp/          whatsapp.ts (factory), directory.ts, inbound/lifecycle helpers
   chatgpt/           chatgpt.ts (factory), references.ts, dom.ts, projects.ts
   claude/            claude.ts (factory), references.ts, dom.ts, projects.ts
+  gemini/            gemini.ts (factory, account guard), dom.ts, extract.ts, references.ts
   browseros/         mcp.ts                   MCP transport shared by delivery and the project catalog
 src/interfaces/
   tui/               terminal dashboard
@@ -162,7 +163,7 @@ const assistant = createFallbackAssistant({ adapters, port: store, logger });
 
 The `RoutingState` and every frontend work unchanged because they only see the contracts. Provider names shown to users come from the registry (`providerName(id)`).
 
-A provider can declare options in its `PROVIDERS` entry (`options: [{ key, label }]`, for example which signed-in account to use). The dashboard's O key then asks for each chosen provider's options after the order, `state.json` saves them under `settings.options.<id>`, and the adapter factory should read them lazily (for example through a `() => ProviderOptions` getter backed by `RoutingState.settings()`), since the order and options change while the app runs. ChatGPT and Claude declare none today.
+A provider can declare options in its `PROVIDERS` entry (`options: [{ key, label, default, pattern, hint, choices }]`; Gemini declares `account`). The dashboard's O screen cycles each enabled provider's options through `choices` (no typing), `state.json` saves non-default values under `settings.options.<id>` (validated against `pattern`), and the adapter factory reads them lazily through a `() => ProviderOptions` getter, since the order and options change while the app runs (see `optionsOf` in [`bootstrap.ts`](../../src/bootstrap.ts)).
 
 ## Composition
 

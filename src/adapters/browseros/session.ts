@@ -17,8 +17,8 @@ export interface BrowserSessionOptions {
   logger: Logger;
   /** Display name of the assistant provider, for log and error text. */
   name: string;
-  /** The provider's new-conversation page: where the delivery tab starts and what the catalog's scratch tab opens. */
-  home: string;
+  /** The provider's new-conversation page: where the delivery tab starts and what the catalog's scratch tab opens. Read on every use, so it may depend on settings that change at runtime. */
+  home: () => string;
   /** JavaScript expression over the interactive `snapshot` that is true once the page offers the message composer. */
   composerReady: string;
   /** BrowserOS script fragment that waits for `url` to hydrate after `page` was opened or navigated to it; nothing for pages that need no wait. */
@@ -126,7 +126,7 @@ export function createBrowserSession(options: BrowserSessionOptions): BrowserSes
     };
     let scratch: number | null = null;
     try {
-      scratch = z.number().parse(await call(`const page=await browser.open(${JSON.stringify(home)});return page.id;`, signal));
+      scratch = z.number().parse(await call(`const page=await browser.open(${JSON.stringify(home())});return page.id;`, signal));
       return await read(call, scratch, signal);
     } catch (error) {
       throw signal.aborted ? signal.reason : error;
@@ -151,7 +151,7 @@ export function createBrowserSession(options: BrowserSessionOptions): BrowserSes
         try {
           await connect(); await ping();
           if (busy()) { logger(`BrowserOS is reachable. ${name} is processing the current message.`); return; }
-          if (pageId === null) await openPage(home);
+          if (pageId === null) await openPage(home());
           else {
             const ready = await run(`const snapshot=await browser.page(${pageId}).snapshot({mode:'interactive'}); return ${composerReady};`);
             if (ready !== true) throw new Error(`${name} composer unavailable. Check sign-in in BrowserOS.`);

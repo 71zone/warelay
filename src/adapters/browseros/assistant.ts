@@ -21,8 +21,8 @@ export interface AssistantDriver {
   id: ProviderId;
   /** Display name for log and error text. */
   name: string;
-  /** The new-conversation page, also where the delivery tab starts. */
-  home: string;
+  /** The new-conversation page, also where the delivery tab starts. Read on every use, so it may follow settings that change at runtime (for example the signed-in account). */
+  home(): string;
   references: AssistantReferencePolicy;
   /** JavaScript expression over the interactive `snapshot` that is true once the page offers the message composer. */
   composerReady: string;
@@ -51,6 +51,10 @@ export interface AssistantDriver {
    * finished uploads are in the composer. It returns `{ url }`, the page address after sending.
    */
   submitScript(pageId: number, pathPattern: string, text: string, attachments: number): string;
+  /** Optional: why a page that is not the destination is the wrong one (another account, signed out), as the user-readable reason a prompt was not sent; null when there is nothing more specific to say. */
+  misplaced?(url: string): string | null;
+  /** Optional page script returning who is signed in (an email address) or null, logged once per change before a prompt is sent. Best effort: a failing script never stops a message. */
+  identityScript?: string;
   /** Reads the complete project catalog through the scratch tab `pageId` (see BrowserSession.readCatalog). */
   readProjects(run: CatalogRun, pageId: number, warn: Logger, signal: AbortSignal): Promise<Project[]>;
 }
@@ -71,10 +75,11 @@ const UPLOAD_POLL_MS = 500;
  * without translation. One delivery tab lives in one app-owned tab group; project listing uses its own MCP client and scratch tab and never touches delivery state.
  */
 export function createBrowserAssistant(driver: AssistantDriver, options: { endpoint: string; logger: Logger; media: MediaStore }): AssistantAdapter {
-  const { name, home } = driver;
-  const browser = createBrowserSession({ endpoint: parseLocalMcpEndpoint(options.endpoint), logger: options.logger, name, home, composerReady: driver.composerReady, settle: driver.settle });
+  const { name } = driver;
+  const browser = createBrowserSession({ endpoint: parseLocalMcpEndpoint(options.endpoint), logger: options.logger, name, home: driver.home, composerReady: driver.composerReady, settle: driver.settle });
   let working = false;
   let lastRevealFailure = '';
+  let lastIdentity: string | null = null;
 
   async function inspect(targetUserId: string | null = null): Promise<z.infer<typeof inspection>> {
     return inspection.parse(await browser.evaluate(driver.inspectionScript, targetUserId));
@@ -138,12 +143,23 @@ export function createBrowserAssistant(driver: AssistantDriver, options: { endpo
       return plain;
     }
   }
+  async function announceIdentity(): Promise<void> {
+    if (!driver.identityScript) return;
+    try {
+      const identity = z.string().nullable().parse(await browser.evaluate(driver.identityScript));
+      if (identity && identity !== lastIdentity) options.logger(`${name} is signed in as ${identity}.`);
+      lastIdentity = identity;
+    } catch { /* best effort */ }
+  }
   const limited = (limit: string): UsageLimitError => new UsageLimitError(driver.id, parseResetAt(limit, Date.now()), `${name}: ${limit}`);
 
   return {
     id: driver.id,
     references: driver.references,
-    start: () => browser.start(() => working),
+    async start(): Promise<void> {
+      await browser.start(() => working);
+      if (!working && browser.pageId !== null) await announceIdentity();
+    },
     stop: () => browser.stop(),
     listProjects(signal?: AbortSignal): Promise<Project[]> { return browser.readCatalog((run, pageId, catalogSignal) => driver.readProjects(run, pageId, options.logger, catalogSignal), signal); },
     async reply(input): Promise<{ conversationRef: string; text: string; blocks?: ReplyBlock[] }> {
@@ -160,7 +176,7 @@ export function createBrowserAssistant(driver: AssistantDriver, options: { endpo
         const conversationUrl = input.conversationRef === null ? null : driver.references.normalizeConversation(input.conversationRef, projectUrl);
         const destination: Destination = { conversationUrl, projectUrl };
         const pathPattern = driver.destinationPathPattern(destination);
-        const target = conversationUrl ?? projectUrl ?? home;
+        const target = conversationUrl ?? projectUrl ?? driver.home();
         saved = conversationUrl;
         const failure = conversationUrl
           ? 'Saved conversation did not load. Restore access rather than creating a replacement.'
@@ -185,7 +201,8 @@ export function createBrowserAssistant(driver: AssistantDriver, options: { endpo
           if (conversationUrl) await reveal(null);
           let before = await inspect();
           if (!navigated && !driver.isDestination(before.url, destination)) { await browser.navigate(target); before = await inspect(); }
-          if (!driver.isDestination(before.url, destination)) throw new Error(failure);
+          if (!driver.isDestination(before.url, destination)) throw new Error(driver.misplaced?.(before.url) ?? failure);
+          await announceIdentity();
           // Nothing has been typed or clicked yet, so a provider that is already over its limit is a clean "not accepted" for the router to move past.
           if (before.limit) throw limited(before.limit);
           if (before.busy) throw new Error('This conversation is already generating a response.');
