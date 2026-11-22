@@ -12,20 +12,20 @@ Everything wabgpt remembers lives in one data directory (`dataDir` in [Configura
 
 | Path in the data directory | Contents |
 | --- | --- |
-| `state.json` | Forwarding sessions and the delivery journal: contact names, JIDs, project and conversation references, lifetimes, conversation start times, activity metadata, processed message IDs and verified identity aliases. |
+| `state.json` | Forwarding sessions and the delivery journal: contact names, JIDs, per-assistant project and conversation references, lifetimes, conversation start times, activity metadata, processed message IDs and verified identity aliases. Also the assistant order and retry setting, the time each limited assistant is usable again, and each contact's recent turns (see below). |
 | `whatsapp/` | WhatsApp linked-device credentials and the persisted contact/chat directory. Do not share this directory. |
 | `onboarding.json` | Only first-run setup progress: which browser you chose, the stage reached and timestamps. Also remembers your previous native `browserMcpUrl` when the managed browser replaces it. |
 | `server-token` | The owner token for `wabgpt serve`, unless `server.tokenFile` points elsewhere. Mode 0600. |
 | `bridge.lock` | The single-writer lock, present only while a process runs. |
 | `state.json.v1.bak` | Backup of an older-format state file; see below. |
 
-Message bodies and reply bodies are **not** stored. The app does not download or persist full WhatsApp message transcripts. Files are private to your OS account (directory 0700, files 0600). For backing up, restoring and resetting the directory see [Maintenance](../runbooks/maintenance.md).
+Message bodies and reply bodies are **not** stored, with one bounded exception: for assistant handoff ([Delivery](../concepts/delivery.md#fallback-assistants)) `state.json` keeps, per contact, the text of the last 16 turns (each cut at 2000 characters). It is dropped when all of that contact's conversations expire and is never shown by the dashboards or the API. The app does not download or persist full WhatsApp message transcripts. Files are private to your OS account (directory 0700, files 0600). For backing up, restoring and resetting the directory see [Maintenance](../runbooks/maintenance.md).
 
 ## What survives a restart
 
 - WhatsApp linked-device credentials reconnect without another QR scan unless the session was unlinked or expired.
 - Synced contact names, phone/LID identity mappings, recent direct chats and their activity metadata are saved to disk and are available before another history sync arrives.
-- Enabled/paused contact choices, each contact's project, lifetime and ChatGPT conversation URL, and the time that conversation started are retained.
+- Enabled/paused contact choices, each contact's project, lifetime and conversation URL per assistant, the time each conversation started, the assistant order and which assistants are limited until when are retained.
 - Previously active forwarding resumes automatically. A global pause also survives restart. Sessions paused after a delivery error stay paused until explicitly enabled again. First-run setup and `wabgpt setup` pause forwarding while they run, so after either one press R in the dashboard to start the enabled contacts.
 - Interrupted deliveries are quarantined on restart rather than replayed; see [Delivery](../concepts/delivery.md#errors-and-pausing).
 - Quitting does not disable configured sessions and does not stop or delete a managed Docker browser or its profile. Opening the dashboard again restores the last running preference.
@@ -36,7 +36,9 @@ An installation that already has saved routing state or a WhatsApp login from an
 
 ## State file versions
 
-`state.json` is versioned (currently version 2). When this version first saves over a file written by an older release (version 1), it keeps that old file next to it as `state.json.v1.bak` (private, never overwritten) so you can go back to the older release. The backup holds the same contact and conversation references as `state.json`, so treat it with the same care and delete it once you no longer need to downgrade. Writes replace the file atomically.
+`state.json` is versioned (currently version 3). When this version first saves over a file written by an older release (version 1 or 2), it keeps that old file next to it as `state.json.v<version>.bak` (private, never overwritten) so you can go back to the older release. Version 3 moved each contact's single conversation and project (always ChatGPT's) into a per-assistant slot, so the migration loses nothing. The backup holds the same contact and conversation references as `state.json`, so treat it with the same care and delete it once you no longer need to downgrade. Writes replace the file atomically.
+
+The assistant order is saved here, not in `config.json`, because the dashboard changes it at runtime: `"settings": { "providers": ["chatgpt", "claude"], "retriesBeforeFallback": 2 }`. The default is `["chatgpt"]`.
 
 ## Identity aliases
 

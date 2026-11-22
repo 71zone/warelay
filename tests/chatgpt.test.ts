@@ -10,7 +10,8 @@ import { readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Application } from '../src/core/application.js';
-import { NotSentError, type Attachment, type ReplyBlock } from '../src/core/contracts.js';
+import { createFallbackAssistant } from '../src/core/fallback.js';
+import { NotSentError, UsageLimitError, type Attachment, type ReplyBlock } from '../src/core/contracts.js';
 import { createMediaStore } from '../src/infrastructure/media.js';
 import { fakeChannel, loadState, providerNames, withDirectory } from './support/core-fixtures.js';
 
@@ -91,6 +92,8 @@ interface State {
   /** When set, the sidebar read request is accepted and then never answered; `blockedClosed` counts those exchanges the client later aborted. */
   blockSidebarReads: boolean; blocked: number; blockedClosed: number;
   projects: Set<string>; redirects: Map<string, string>; slugConversations: boolean; driftAfterInspect: string | null; driftOnObserve: string | null;
+  /** The usage-limit notice the page shows, null when none. */
+  limit: string | null;
   sidebar: Sidebar; rich: Rich;
   /** ChatGPT unmounts a finished turn that is far from the viewport: after `vanishAfterReveals` scrolls to the end of the conversation the turn is gone, and one more scroll brings it back. */
   virtualization: { vanishAfterReveals: number | null; reveals: number; hidden: boolean };
@@ -101,7 +104,7 @@ async function withServer(run: (fixture: Fixture) => Promise<void>): Promise<voi
   const opened: string[] = [];
   const state: State = {
     initializations: 0, submissions: 0, disconnectOnSubmit: false, expireAfterSubmit: false, complete: true, initialTurns: 0, reclaimedGroups: 0, chatgptTabsOpened: 0, opened, groupIdsOmitted: false, tabGroupListings: 0,
-    navigations: [], waits: [], submittedAt: [], conversations: 0, blockSidebarReads: false, blocked: 0, blockedClosed: 0, projects: new Set([projectA, projectB]), redirects: new Map(), slugConversations: false, driftAfterInspect: null, driftOnObserve: null,
+    navigations: [], waits: [], submittedAt: [], conversations: 0, blockSidebarReads: false, blocked: 0, blockedClosed: 0, projects: new Set([projectA, projectB]), redirects: new Map(), slugConversations: false, driftAfterInspect: null, driftOnObserve: null, limit: null,
     virtualization: { vanishAfterReveals: null, reveals: 0, hidden: false },
     sidebar: { projects: [], limit: null, revealed: false, collapsed: false, signedOut: false, hydrateAfter: 0, reads: 0, explorerCount: null, chatMoreClicks: 0, recentsMoreClicks: 0, toggles: 0, signOutOnToggle: false },
     rich: { events: [], uploads: [], staged: 0, uploadPolls: 0, uploadFails: false, menuOpen: false, composerPolls: 0, dropAfterPolls: null, replyText: null, media: false, extraction: null, assets: new Map(), released: [], shot: { png: Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 7, 7]), fails: false, captured: 0, resultLimits: [] } },
@@ -158,7 +161,7 @@ async function withServer(run: (fixture: Fixture) => Promise<void>): Promise<voi
       evaluateInPage: async (fn: unknown, argument?: unknown) => {
         const source = String(fn);
         if (source.includes('data-app-action-sidebar-project-id') || source.includes('data-project-row')) return { value: runCatalogScript(state, source, argument, url) };
-        if (source.includes('data-composer-attachments')) {
+        if (source.includes('data-composer-attachments') && !source.includes('data-conversation-role')) {
           if (state.rich.dropAfterPolls !== null && ++state.rich.composerPolls > state.rich.dropAfterPolls) state.rich.staged = 0;
           const uploading = state.rich.uploadPolls > 0 ? 1 : 0;
           if (uploading) state.rich.uploadPolls--;
@@ -185,7 +188,7 @@ async function withServer(run: (fixture: Fixture) => Promise<void>): Promise<voi
         const userId = count ? `user-${count}` : null;
         const matched = !targetUser || targetUser === userId;
         const text = state.rich.replyText ?? 'Completed response';
-        const value = { url, users: Math.min(count, 5), assistants: Math.min(state.complete ? count : Math.max(0, count - 1), 5), userId: matched ? userId : null, assistantId: matched && count && state.complete ? `assistant-${count}` : null, text: matched && state.complete && count ? text : '', complete: matched && state.complete, busy: !state.complete && count > 0, error: null, media: state.rich.media };
+        const value = { url, users: Math.min(count, 5), assistants: Math.min(state.complete ? count : Math.max(0, count - 1), 5), userId: matched ? userId : null, assistantId: matched && count && state.complete ? `assistant-${count}` : null, text: matched && state.complete && count ? text : '', complete: matched && state.complete, busy: !state.complete && count > 0, error: null, limit: state.limit, media: state.rich.media };
         if (state.driftAfterInspect) { url = state.driftAfterInspect; state.driftAfterInspect = null; }
         return { value: state.virtualization.hidden ? { ...value, userId: null, assistantId: null, text: '', complete: false, busy: false } : value };
       },
@@ -332,6 +335,45 @@ test('prompt acceptance is acknowledged once before the assistant response compl
       });
       assert.equal(acknowledgements, 1);
       assert.equal(fixture.state.submissions, 1);
+      assert.equal(reply.text, 'Completed response');
+    } finally { await browser.stop().catch(() => undefined); }
+  });
+});
+
+const limitNotice = "You've reached the current usage cap for GPT-5. Try again after 3:45 PM.";
+
+test('a usage-limit notice before submitting is thrown as UsageLimitError and nothing is submitted', async () => {
+  await withServer(async fixture => {
+    const browser = createChatGPT({ endpoint: fixture.endpoint, logger: () => {}, media });
+    try {
+      await browser.start(); fixture.state.limit = limitNotice;
+      const failure = await browser.reply({ conversationRef: 'https://chatgpt.com/c/existing', projectRef: null, text: 'Too late', ...quiet }).then(() => null, (error: unknown) => error);
+      assert.ok(failure instanceof UsageLimitError && !(failure instanceof NotSentError));
+      assert.equal(failure.provider, 'chatgpt');
+      assert.ok(failure.resetAt !== null && new Date(failure.resetAt).getMinutes() === 45);
+      assert.equal(fixture.state.submissions, 0);
+    } finally { await browser.stop().catch(() => undefined); }
+  });
+});
+
+test('a usage-limit notice that appears after submitting is thrown as UsageLimitError without a second submission', async () => {
+  await withServer(async fixture => {
+    const browser = createChatGPT({ endpoint: fixture.endpoint, logger: () => {}, media });
+    try {
+      await browser.start(); fixture.state.complete = false;
+      const failure = await browser.reply({ conversationRef: 'https://chatgpt.com/c/existing', projectRef: null, text: 'Accepted first', ...quiet, onSubmitted: async () => { fixture.state.limit = limitNotice; } }).then(() => null, (error: unknown) => error);
+      assert.ok(failure instanceof UsageLimitError);
+      assert.equal(fixture.state.submissions, 1);
+    } finally { await browser.stop().catch(() => undefined); }
+  });
+});
+
+test('a reply that completed in full is delivered even when a limit notice shows beside it', async () => {
+  await withServer(async fixture => {
+    const browser = createChatGPT({ endpoint: fixture.endpoint, logger: () => {}, media });
+    try {
+      await browser.start(); fixture.state.complete = false;
+      const reply = await browser.reply({ conversationRef: 'https://chatgpt.com/c/existing', projectRef: null, text: 'Last one', ...quiet, onSubmitted: async () => { fixture.state.limit = limitNotice; fixture.state.complete = true; } });
       assert.equal(reply.text, 'Completed response');
     } finally { await browser.stop().catch(() => undefined); }
   });
@@ -720,7 +762,7 @@ test('Application.close cancels an in-flight catalog blocked on the MCP server, 
     await withServer(async fixture => {
       fixture.state.blockSidebarReads = true;
       const browser = createChatGPT({ endpoint: fixture.endpoint, logger: () => {}, media });
-      const app = new Application({ configPath: join(directory, 'config.json'), ...providerNames }, await loadState(directory), fakeChannel(), browser);
+      const app = new Application({ configPath: join(directory, 'config.json'), ...providerNames }, await loadState(directory), fakeChannel(), createFallbackAssistant({ adapters: [browser], logger: () => {}, port: { settings: () => ({ providers: ['chatgpt'], retriesBeforeFallback: 2, options: {} }), limitedUntil: () => null, markLimited: async () => {} } }));
       const listing = assert.rejects(app.listProjects(), /closing/);
       await until(() => fixture.state.blocked === 1, 'the sidebar read to reach the server and block');
       await app.close();

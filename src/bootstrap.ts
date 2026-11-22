@@ -1,8 +1,10 @@
 import { join } from 'node:path';
 import { createChatGPT } from './adapters/chatgpt/chatgpt.js';
+import { createClaude } from './adapters/claude/claude.js';
 import { createJsonStatePersistence } from './adapters/storage/json-state.js';
 import { createWhatsApp } from './adapters/whatsapp/whatsapp.js';
 import { Application } from './core/application.js';
+import { createFallbackAssistant } from './core/fallback.js';
 import { RoutingState } from './core/state.js';
 import type { LoadedConfig } from './infrastructure/config.js';
 import { routeConsoleOutput } from './infrastructure/console-output.js';
@@ -19,8 +21,9 @@ export async function createApplication(config: LoadedConfig, options: { notBefo
   let application: Application | undefined;
   const logger = (message: string): void => { application?.log(message); };
   const media = createMediaStore(join(config.dataDir, 'media'));
-  const assistant = createChatGPT({ endpoint: config.browserMcpUrl, logger, media });
-  const store = await RoutingState.load(createJsonStatePersistence(config.dataDir), assistant.references);
+  const adapters = [createChatGPT({ endpoint: config.browserMcpUrl, logger, media }), createClaude({ endpoint: config.browserMcpUrl, logger, media })];
+  const store = await RoutingState.load(createJsonStatePersistence(config.dataDir), Object.fromEntries(adapters.map(adapter => [adapter.id, adapter.references])));
+  const assistant = createFallbackAssistant({ adapters, port: store, logger });
   const channel = createWhatsApp({
     authDir: join(config.dataDir, 'whatsapp'), logger, media,
     onMessage: message => application?.receive(message),
@@ -31,7 +34,7 @@ export async function createApplication(config: LoadedConfig, options: { notBefo
     notBeforeSeconds: options.notBeforeSeconds,
   });
   for (const alias of channel.identities()) await store.linkIdentity(alias);
-  application = new Application({ configPath: config.path, channelName: 'WhatsApp', assistantName: 'ChatGPT' }, store, channel, assistant);
+  application = new Application({ configPath: config.path, channelName: 'WhatsApp' }, store, channel, assistant);
   return application;
 }
 

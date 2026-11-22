@@ -6,9 +6,9 @@ import { join } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { z } from 'zod';
 import { parseHTML } from 'linkedom';
-import { resolveBlocks, type AssetContext } from '../src/adapters/chatgpt/assets.js';
+import { resolveBlocks, type AssetContext } from '../src/adapters/browseros/assets.js';
 import { chatgptExtractionScript, extraction, type Extraction } from '../src/adapters/chatgpt/extract.js';
-import { MAX_REPLY_SHOTS, MAX_SHOT_SLICES, SHOT_RESULT_CHARS, captureScript, captureShot } from '../src/adapters/chatgpt/shots.js';
+import { MAX_REPLY_SHOTS, MAX_SHOT_SLICES, SHOT_RESULT_CHARS, captureScript, captureShot } from '../src/adapters/browseros/shots.js';
 import { createMediaStore } from '../src/infrastructure/media.js';
 
 // Markup follows what ChatGPT's renderer produced for the STAR interview reply: a bordered card whose rows are a letter and a titled description with
@@ -156,7 +156,7 @@ async function fakePage(answer: (code: string) => unknown): Promise<Page> {
   const directory = await mkdtemp(join(tmpdir(), 'wabgpt-shots-'));
   const calls: Page['calls'] = [];
   const logs: string[] = [];
-  const context: AssetContext = { run: async (code, maxChars) => { calls.push({ code, maxChars }); return answer(code); }, pageId: 7, logger: message => { logs.push(message); }, media: createMediaStore(directory) };
+  const context: AssetContext = { run: async (code, maxChars) => { calls.push({ code, maxChars }); return answer(code); }, pageId: 7, provider: 'ChatGPT', logger: message => { logs.push(message); }, media: createMediaStore(directory) };
   return { context, calls, logs, directory };
 }
 

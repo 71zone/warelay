@@ -1,13 +1,18 @@
 import { EventEmitter } from 'node:events';
 import { Bridge, type ProviderNames } from './bridge.js';
-import type { AssistantAdapter, Contact, IdentityAlias, IncomingMessage, MessagingAdapter, Project, RecentChat } from './contracts.js';
+import type { Assistant, AssistantSettings, Contact, IdentityAlias, IncomingMessage, MessagingAdapter, Project, ProviderId, RecentChat } from './contracts.js';
+import { providerName, providerOfRef } from './providers.js';
 import { SingleFlight } from './single-flight.js';
-import type { RoutingState, Route } from './state.js';
+import { slotOf, type RoutingState, type Route } from './state.js';
 
 export interface ApplicationMetadata extends ProviderNames {
   /** Location of the user's configuration file, shown by frontends. */
   configPath: string;
 }
+
+/** One configured assistant, in priority order, with the time it is usable again when a usage limit (or repeated failure) took it out of rotation. */
+export interface ProviderView { id: ProviderId; name: string; limitedUntil: number | null }
+export interface AssistantView extends AssistantSettings { providerViews: ProviderView[] }
 
 export interface ApplicationSnapshot {
   routes: Route[];
@@ -17,6 +22,7 @@ export interface ApplicationSnapshot {
   armed: boolean;
   channelStatus: string;
   assistantStatus: string;
+  assistant: AssistantView;
 }
 
 function message(error: unknown): string { return error instanceof Error ? error.message : String(error); }
@@ -26,7 +32,7 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
   private channelAttempt: Promise<void> | null = null;
   private assistantAttempt: Promise<void> | null = null;
   private resumeAttempt: Promise<void> | null = null;
-  private readonly catalog = new SingleFlight<Project[]>();
+  private readonly catalogs = new Map<ProviderId, SingleFlight<Project[]>>();
   private closing: Promise<void> | null = null;
   private closed = false;
   private generation = 0;
@@ -34,11 +40,17 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
   private channelStatus = 'disconnected';
   private assistantStatus = 'disconnected';
 
-  constructor(readonly metadata: ApplicationMetadata, private readonly store: RoutingState, private readonly channel: MessagingAdapter, private readonly assistant: AssistantAdapter) {
+  constructor(readonly metadata: ApplicationMetadata, private readonly store: RoutingState, private readonly channel: MessagingAdapter, private readonly assistant: Assistant) {
     super();
     this.bridge = new Bridge(store, assistant, channel, text => this.log(text), metadata);
   }
   log(text: string): void { this.emit('log', text); this.emit('change'); }
+  /** Display name of the assistant(s) in use: the configured providers in priority order. */
+  assistantName(): string { return this.store.settings().providers.map(providerName).join(' / '); }
+  /** The project a route has on `provider` (the primary by default). */
+  projectRef(route: Route | undefined, provider: ProviderId = this.primaryProvider()): string | null { return route ? slotOf(route, provider).projectRef : null; }
+  /** The provider new contacts and project picks use: the first configured. */
+  primaryProvider(): ProviderId { return this.store.settings().providers[0] ?? ''; }
   receive(incoming: IncomingMessage): void { this.bridge.receive(incoming); }
   async linkIdentity(alias: IdentityAlias): Promise<void> {
     await this.store.linkIdentity(alias);
@@ -61,7 +73,17 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
       routes, contacts, directory: [...directory.values()].sort((a, b) => a.name.localeCompare(b.name)),
       chats, armed: this.bridge.isArmed(),
       channelStatus: this.channelStatus, assistantStatus: this.assistantStatus,
+      assistant: this.assistantView(),
     };
+  }
+  private assistantView(): AssistantView {
+    const settings = this.store.settings();
+    return { ...settings, providerViews: settings.providers.map(id => ({ id, name: providerName(id), limitedUntil: this.store.limitedUntil(id) })) };
+  }
+  /** Chooses the assistants and their order (first = primary) and how often a send that did not leave is retried before the next assistant takes over. */
+  async setAssistantSettings(settings: AssistantSettings): Promise<void> {
+    await this.store.setSettings(settings);
+    this.log(`Assistants: ${this.assistantName()}; ${settings.retriesBeforeFallback} retr${settings.retriesBeforeFallback === 1 ? 'y' : 'ies'} before falling back. Contacts keep their saved conversation on each one.`);
   }
   /**
    * Self-healing watchdog. Forwarding the user asked for (the saved running flag) must not stay off because a dependency blipped: whenever it is
@@ -86,7 +108,7 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
   async restore(): Promise<void> {
     this.watch();
     if (this.store.isRunning() && this.store.routes().some(route => route.enabled)) {
-      this.log(`Restoring saved forwarding sessions and their ${this.metadata.assistantName} conversations.`);
+      this.log(`Restoring saved forwarding sessions and their ${this.assistantName()} conversations.`);
       await this.resume();
     } else {
       if (this.channel.hasSavedSession()) this.login();
@@ -135,7 +157,7 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
   async pause(): Promise<void> {
     this.generation++; this.bridge.disarm();
     await this.store.setRunning(false);
-    this.log(`All forwarding paused. Saved contacts and ${this.metadata.assistantName} conversation references are unchanged.`);
+    this.log(`All forwarding paused. Saved contacts and ${this.assistantName()} conversation references are unchanged.`);
   }
   async toggle(contact: Contact): Promise<void> {
     await this.setContactEnabled(contact, !this.store.route(contact.id)?.enabled);
@@ -146,12 +168,12 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
     if (enabled) {
       if (route?.enabled) { this.log(`${route.name} is already enabled.`); return; }
       await this.store.enable(contact);
-      this.log(`Enabled ${contact.name}. Incoming text will be shared with ${this.metadata.assistantName} and its reply sent back automatically.`);
+      this.log(`Enabled ${contact.name}. Incoming text will be shared with ${this.assistantName()} and its reply sent back automatically.`);
       await this.resume();
     } else {
       if (!route?.enabled) { this.log(`${contact.name} is already paused.`); return; }
       await this.store.pause(contact.id);
-      this.log(`Paused ${route.name}. The ${this.metadata.assistantName} conversation is retained.`);
+      this.log(`Paused ${route.name}. The ${this.assistantName()} conversation is retained.`);
     }
     this.emit('change');
   }
@@ -173,28 +195,33 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
     return contact;
   }
   /**
-   * Project picker catalog. Single-flight; the adapter owns an independent connection, so this never touches the delivery assistant session or the channel.
+   * Project picker catalog of one provider (the primary by default). Single-flight per provider; the adapter owns an independent connection, so this never touches the delivery assistant session or the channel.
    * Cancellation is explicit: the shared read has its own controller. A caller's `signal` rejects that caller when it aborts; the read itself is cancelled only
    * once every signalled caller has left (callers without a signal keep it alive) or when the application closes. Cancelling the last interested caller
    * resolves only after the adapter has drained its cleanup.
    */
-  listProjects(signal?: AbortSignal): Promise<Project[]> {
+  listProjects(provider: ProviderId = this.primaryProvider(), signal?: AbortSignal): Promise<Project[]> {
     if (this.closed) return Promise.reject(new Error('wabgpt is closing.'));
-    return this.catalog.join(async shared => (await this.assistant.listProjects(shared)).map(project => ({ ...project })), signal);
+    let catalog = this.catalogs.get(provider);
+    if (!catalog) this.catalogs.set(provider, catalog = new SingleFlight<Project[]>());
+    return catalog.join(async shared => (await this.assistant.listProjects(provider, shared)).map(project => ({ ...project })), signal);
   }
-  async setProject(contact: Contact, ref: string | null): Promise<void> {
-    const { assistantName } = this.metadata;
-    const before = this.store.route(contact.id)?.projectRef ?? null;
-    await this.store.setProject(contact, ref);
+  /** Assigns or clears a project on one provider: the one the reference points at, else `provider`, else the primary. */
+  async setProject(contact: Contact, ref: string | null, provider?: ProviderId): Promise<void> {
+    const target = provider ?? (ref === null ? undefined : providerOfRef(ref)) ?? this.primaryProvider();
+    const assistantName = providerName(target);
+    const before = slotOf(this.store.route(contact.id) ?? { refs: {} }, target).projectRef;
+    await this.store.setProject(contact, target, ref);
     const route = this.store.route(contact.id);
+    const now = route ? slotOf(route, target).projectRef : null;
     const state = route?.enabled ? 'It stays enabled' : 'It stays paused';
-    if (route?.projectRef === before) this.log(`${contact.name} already has ${before === null ? `no ${assistantName} project` : `that ${assistantName} project`}; nothing changed. ${state}.`);
-    else if (route?.projectRef === null) this.log(`Cleared the ${assistantName} project for ${contact.name}; its saved conversation link was dropped and its next message starts a new conversation. ${state}.`);
+    if (now === before) this.log(`${contact.name} already has ${before === null ? `no ${assistantName} project` : `that ${assistantName} project`}; nothing changed. ${state}.`);
+    else if (now === null) this.log(`Cleared the ${assistantName} project for ${contact.name}; its saved conversation link was dropped and its next message starts a new conversation. ${state}.`);
     else this.log(`Assigned a ${assistantName} project to ${contact.name}; any earlier conversation link was dropped and its next message starts a new conversation there. ${state}. Use a project with project-only memory.`);
   }
   async setConversationTtl(contact: Contact, minutes: number | null): Promise<void> {
     await this.store.setConversationTtl(contact, minutes);
-    const { assistantName } = this.metadata;
+    const assistantName = this.assistantName();
     this.log(minutes === null ? `${contact.name}'s ${assistantName} conversation will never expire.` : `${contact.name}'s ${assistantName} conversation now expires ${minutes} minute${minutes === 1 ? '' : 's'} after it started, checked at its next message.`);
   }
   /** Single-flight: concurrent callers wait for the same shutdown. */
@@ -202,10 +229,10 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
     this.closing ??= (async () => {
       this.closed = true; this.generation++; this.bridge.disarm();
       clearTimeout(this.healTimer);
-      this.catalog.cancel(new Error('wabgpt is closing.'));
+      for (const catalog of this.catalogs.values()) catalog.cancel(new Error('wabgpt is closing.'));
       await this.resumeAttempt?.catch(() => undefined);
       await this.assistantAttempt?.catch(() => undefined);
-      await this.catalog.drained();
+      await Promise.all([...this.catalogs.values()].map(catalog => catalog.drained()));
       await this.bridge.idle();
       await Promise.allSettled([this.channel.stop(), this.assistant.stop()]);
     })();

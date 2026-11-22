@@ -234,9 +234,9 @@ test('adding a contact enables it, starts forwarding through the guarded path an
     assert.deepEqual(harness.calls.sent, []);
 
     const saved = await harness.persisted();
-    assert.equal(saved.version, 2);
+    assert.equal(saved.version, 3);
     assert.equal(saved.running, true);
-    assert.deepEqual(saved.routes.map(item => [item.contactId, item.enabled, item.conversationRef]), [['14155550199@s.whatsapp.net', true, null]]);
+    assert.deepEqual(saved.routes.map(item => [item.contactId, item.enabled, item.refs.chatgpt?.conversationRef]), [['14155550199@s.whatsapp.net', true, null]]);
     const reloaded = await loadState(join(harness.directory, 'data'), undefined, opaqueReferences);
     assert.equal(reloaded.route('14155550199@s.whatsapp.net')?.enabled, true);
 
@@ -304,7 +304,7 @@ test('project and lifetime settings save a paused route and never enable forward
     assert.equal(harness.calls.assistantStart, 0);
     assert.equal(harness.calls.channelStart, 0);
     const saved = await harness.persisted();
-    assert.deepEqual(saved.routes.map(item => [item.contactId, item.enabled, item.projectRef, item.conversationTtlMinutes]), [[ada, false, 'ws:alpha', 720]]);
+    assert.deepEqual(saved.routes.map(item => [item.contactId, item.enabled, item.refs.chatgpt?.projectRef, item.conversationTtlMinutes]), [[ada, false, 'ws:alpha', 720]]);
     assert.equal(saved.running, false);
 
     assert.equal((await harness.api(session, 'POST', '/api/contacts/ttl', { contactId: ada, ttl: 'never' })).status, 200);
@@ -318,7 +318,7 @@ test('project and lifetime settings save a paused route and never enable forward
     assert.equal((await harness.persisted()).routes[0]?.conversationTtlMinutes, 1440);
 
     assert.equal((await harness.api(session, 'POST', '/api/contacts/project', { contactId: ada, projectRef: null })).status, 200);
-    assert.equal((await harness.persisted()).routes[0]?.projectRef, null);
+    assert.equal((await harness.persisted()).routes[0]?.refs.chatgpt?.projectRef, null);
     const invalid = await harness.api(session, 'POST', '/api/contacts/project', { contactId: ada, projectRef: 'https://attacker.example/x' });
     assert.equal(invalid.status, 409);
     assert.ok(!asError(invalid).message.includes('attacker.example'));

@@ -1,6 +1,7 @@
 import { setTimeout } from 'node:timers/promises';
 import { z } from 'zod';
 import type { Logger, Project } from '../../core/contracts.js';
+import type { CatalogRun } from '../browseros/session.js';
 import { normalizeProjectUrl } from './references.js';
 
 /**
@@ -95,9 +96,6 @@ const stableReadsWithoutProjects = 4;
 
 const signedOut = 'ChatGPT is signed out in BrowserOS. Sign in there, then refresh the project list.';
 const challenged = 'ChatGPT is showing a verification challenge in BrowserOS. Complete it there, then refresh the project list.';
-
-/** Runs one BrowserOS script in the catalog's scratch session; `signal` cancels that one request. */
-export type CatalogRun = (code: string, signal?: AbortSignal) => Promise<unknown>;
 
 async function evaluate(run: CatalogRun, pageId: number, script: string, mode: string, settle: boolean, signal?: AbortSignal): Promise<unknown> {
   return evaluated.parse(await run(`const page=browser.page(${pageId});return await page.evaluateInPage(${script},${JSON.stringify(mode)},${settle ? '{settle:true}' : '{}'});`, signal)).value;

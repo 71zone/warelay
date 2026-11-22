@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Bridge } from '../src/core/bridge.js';
-import { NotSentError, type AssistantAdapter, type IncomingMessage, type MessagingAdapter } from '../src/core/contracts.js';
+import { NotSentError, type Assistant, type IncomingMessage, type MessagingAdapter } from '../src/core/contracts.js';
 import type { RoutingState } from '../src/core/state.js';
 import { fakeAssistant, fakeChannel, loadState, opaqueReferences, projectA, projectB, providerNames, withDirectory } from './support/core-fixtures.js';
 
 async function fixture(run: (store: RoutingState, directory: string) => Promise<void>, now?: () => number): Promise<void> {
   await withDirectory(async directory => { await run(await loadState(directory, now), directory); }, 'wabgpt-bridge-');
 }
-const bridgeOf = (store: RoutingState, assistant: AssistantAdapter, channel: MessagingAdapter, logger: (message: string) => void = () => {}): Bridge => new Bridge(store, assistant, channel, logger, providerNames);
+const bridgeOf = (store: RoutingState, assistant: Assistant, channel: MessagingAdapter, logger: (message: string) => void = () => {}): Bridge => new Bridge(store, assistant, channel, logger, providerNames);
 const alice = { id: '11111111111@s.whatsapp.net', name: 'Alice' };
 const bob = { id: '22222222222@s.whatsapp.net', name: 'Bob' };
 const incoming = (id: string, contact = alice, acknowledge: () => Promise<void> = async () => {}): IncomingMessage => ({ id, contact, text: `Question ${id}`, attachments: [], acknowledge });
@@ -51,7 +51,7 @@ test('a failure after the prompt was accepted never replays it, keeps the contac
     bridge.receive(incoming('a')); bridge.receive(incoming('b')); await bridge.idle();
     assert.equal(calls, 2);
     assert.equal(store.route(alice.id)?.enabled, true);
-    assert.equal(store.route(alice.id)?.conversationRef, 'https://chatgpt.com/c/retained');
+    assert.equal(store.route(alice.id)?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/retained');
     assert.deepEqual(notices, Array(2).fill('ChatGPT did not return a reply: Response timed out after submission. Please ask again.'));
     bridge.receive(incoming('a')); await bridge.idle(); assert.equal(calls, 2);
     assert.equal(notices.length, 2);
@@ -129,8 +129,8 @@ test('nothing is sent to the contact when the failure is a deliberate pause or w
 test('restart quarantines interrupted delivery and prevents cross-contact conversation reuse', async () => {
   await fixture(async (store, directory) => {
     await store.enable(alice); await store.enable(bob);
-    await store.conversation(alice.id, 'https://chatgpt.com/c/unique');
-    await assert.rejects(store.conversation(bob.id, 'https://chatgpt.com/c/unique'), /another contact/);
+    await store.conversation(alice.id, 'chatgpt', 'https://chatgpt.com/c/unique');
+    await assert.rejects(store.conversation(bob.id, 'chatgpt', 'https://chatgpt.com/c/unique'), /another contact/);
     await store.claim('interrupted', alice.id);
     const restored = await loadState(directory);
     assert.equal(restored.route(alice.id)?.enabled, false);
@@ -255,10 +255,10 @@ test('log lines and route errors use the configured provider names', async () =>
     await store.enable(alice);
     const logs: string[] = [];
     const assistant = fakeAssistant({ reply: async input => { await input.onSubmitted(); throw new Error('boom'); } });
-    const bridge = new Bridge(store, assistant, fakeChannel(), text => logs.push(text), { channelName: 'Chat', assistantName: 'Helper' }); bridge.arm();
+    const bridge = new Bridge(store, assistant, fakeChannel(), text => logs.push(text), { channelName: 'Chat' }); bridge.arm();
     bridge.receive(incoming('named')); await bridge.idle();
-    assert.ok(logs.some(line => line.startsWith('Helper accepted the message from Alice after ') && line.endsWith('sending Chat read receipt.')));
-    assert.equal(logs.at(-1), 'No reply was delivered to Alice: boom The Helper conversation may still hold the answer; the message was not replayed and Alice stays enabled.');
+    assert.ok(logs.some(line => line.startsWith('ChatGPT accepted the message from Alice after ') && line.endsWith('sending Chat read receipt.')));
+    assert.equal(logs.at(-1), 'No reply was delivered to Alice: boom The ChatGPT conversation may still hold the answer; the message was not replayed and Alice stays enabled.');
   });
 });
 
@@ -276,6 +276,7 @@ test('a message is retried on its own while the provider provably has not receiv
       },
     });
     const channel = fakeChannel({ sendText: async () => { if (++sends < 2) throw new NotSentError('offline'); } });
+    await assistant.start(); repairs = 0;
     const bridge = bridgeOf(store, assistant, channel); bridge.arm();
     bridge.receive(incoming('retry')); await bridge.idle();
     assert.deepEqual({ attempts, repairs, sends }, { attempts: 3, repairs: 2, sends: 2 });
@@ -286,7 +287,7 @@ test('a message is retried on its own while the provider provably has not receiv
 test('a conversation is reused until its fixed lifetime ends, then the next message starts a fresh one in the project', async () => {
   let clock = 10_000_000;
   await fixture(async (store, directory) => {
-    await store.setProject(alice, projectA);
+    await store.setProject(alice, 'chatgpt', projectA);
     await store.setConversationTtl(alice, 5);
     await store.enable(alice);
     const calls: Array<{ conversationRef: string | null; projectRef: string | null }> = [];
@@ -302,7 +303,7 @@ test('a conversation is reused until its fixed lifetime ends, then the next mess
     bridge.receive(incoming('a')); await bridge.idle();
     clock += 5 * 60_000 - 1;
     bridge.receive(incoming('b')); await bridge.idle();
-    assert.equal(store.route(alice.id)?.conversationStartedAt, 10_000_000);
+    assert.equal(store.route(alice.id)?.refs.chatgpt?.startedAt, 10_000_000);
     clock += 1;
     bridge.receive(incoming('c')); await bridge.idle();
     assert.deepEqual(calls, [
@@ -310,11 +311,11 @@ test('a conversation is reused until its fixed lifetime ends, then the next mess
       { conversationRef: `${projectA}/c/convo-1`, projectRef: projectA },
       { conversationRef: null, projectRef: projectA },
     ]);
-    assert.equal(store.route(alice.id)?.conversationRef, `${projectA}/c/convo-2`);
-    assert.equal(store.route(alice.id)?.conversationStartedAt, clock);
+    assert.equal(store.route(alice.id)?.refs.chatgpt?.conversationRef, `${projectA}/c/convo-2`);
+    assert.equal(store.route(alice.id)?.refs.chatgpt?.startedAt, clock);
     assert.equal(store.route(alice.id)?.enabled, true);
     const restarted = await loadState(directory, () => clock + 10);
-    assert.equal(restarted.route(alice.id)?.conversationStartedAt, clock);
+    assert.equal(restarted.route(alice.id)?.refs.chatgpt?.startedAt, clock);
   }, () => clock);
 });
 
@@ -323,27 +324,27 @@ test('an expired conversation is cleared before submission and not by a timer or
   await fixture(async store => {
     await store.setConversationTtl(alice, 1);
     await store.enable(alice);
-    await store.conversation(alice.id, 'https://chatgpt.com/c/old');
+    await store.conversation(alice.id, 'chatgpt', 'https://chatgpt.com/c/old');
     const seen: Array<string | null> = [];
     const stored: Array<string | null> = [];
     const assistant = fakeAssistant({ reply: async input => {
       seen.push(input.conversationRef);
-      stored.push(store.route(alice.id)?.conversationRef ?? null);
+      stored.push(store.route(alice.id)?.refs.chatgpt?.conversationRef ?? null);
       await input.onConversation('https://chatgpt.com/c/new');
       await input.onSubmitted();
       return { conversationRef: 'https://chatgpt.com/c/new', text: 'Answer' };
     } });
     const bridge = bridgeOf(store, assistant, fakeChannel()); bridge.arm();
     clock += 10 * 60_000;
-    assert.equal(store.route(alice.id)?.conversationRef, 'https://chatgpt.com/c/old');
+    assert.equal(store.route(alice.id)?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/old');
     bridge.receive(incoming('a')); await bridge.idle();
     assert.deepEqual(seen, [null]);
     assert.deepEqual(stored, [null]);
-    assert.equal(store.route(alice.id)?.conversationRef, 'https://chatgpt.com/c/new');
+    assert.equal(store.route(alice.id)?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/new');
     clock += 10 * 60_000;
     bridge.receive(incoming('a')); await bridge.idle();
     assert.equal(seen.length, 1);
-    assert.equal(store.route(alice.id)?.conversationRef, 'https://chatgpt.com/c/new');
+    assert.equal(store.route(alice.id)?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/new');
   }, () => clock);
 });
 
@@ -364,23 +365,23 @@ test('project changes wait for active delivery and queued messages use the lates
     } });
     const bridge = bridgeOf(store, assistant, fakeChannel()); bridge.arm();
     bridge.receive(incoming('a')); await entered.promise;
-    await assert.rejects(store.setProject(alice, projectA), /delivered/);
+    await assert.rejects(store.setProject(alice, 'chatgpt', projectA), /delivered/);
     bridge.receive(incoming('b'));
     release.resolve(); await bridge.idle();
     assert.deepEqual(projects, [null, null]);
-    await store.setProject(alice, projectA);
-    assert.equal(store.route(alice.id)?.conversationRef, null);
+    await store.setProject(alice, 'chatgpt', projectA);
+    assert.equal(store.route(alice.id)?.refs.chatgpt?.conversationRef, null);
     bridge.receive(incoming('c')); await bridge.idle();
-    await store.setProject(alice, projectB);
+    await store.setProject(alice, 'chatgpt', projectB);
     bridge.receive(incoming('d')); await bridge.idle();
     assert.deepEqual(projects, [null, null, projectA, projectB]);
-    assert.equal(store.route(alice.id)?.conversationRef, `${projectB}/c/4`);
+    assert.equal(store.route(alice.id)?.refs.chatgpt?.conversationRef, `${projectB}/c/4`);
   });
 });
 
 test('configuring a project for an untouched contact does not let its messages be forwarded', async () => {
   await fixture(async store => {
-    await store.setProject(alice, projectA);
+    await store.setProject(alice, 'chatgpt', projectA);
     const assistant = fakeAssistant({ reply: async () => { assert.fail('Paused route must not forward'); } });
     const channel = fakeChannel({ sendText: async () => { assert.fail('Paused route must not reply'); } });
     const bridge = bridgeOf(store, assistant, channel); bridge.arm();
@@ -393,7 +394,7 @@ test('configuring a project for an untouched contact does not let its messages b
 test('opaque non-URL provider references flow through delivery and persistence untouched by core', async () => {
   await withDirectory(async directory => {
     const store = await loadState(directory, () => 1, opaqueReferences);
-    await store.setProject(alice, 'ws:Notes');
+    await store.setProject(alice, 'chatgpt', 'ws:Notes');
     await store.enable(alice);
     const seen: Array<{ conversationRef: string | null; projectRef: string | null }> = [];
     let thread = 0;
@@ -412,14 +413,14 @@ test('opaque non-URL provider references flow through delivery and persistence u
     bridge.receive(incoming('a')); bridge.receive(incoming('b')); await bridge.idle();
     assert.deepEqual(seen, [{ conversationRef: null, projectRef: 'ws:notes' }, { conversationRef: 'ws:notes/thread:t1', projectRef: 'ws:notes' }]);
     assert.deepEqual(replies, ['Answer', 'Answer']);
-    assert.equal((await loadState(directory, () => 2, opaqueReferences)).route(alice.id)?.conversationRef, 'ws:notes/thread:t1');
+    assert.equal((await loadState(directory, () => 2, opaqueReferences)).route(alice.id)?.refs.chatgpt?.conversationRef, 'ws:notes/thread:t1');
   });
 });
 
 test('a conversation reference outside the assigned project pauses the contact instead of being delivered', async () => {
   await withDirectory(async directory => {
     const store = await loadState(directory, () => 1, opaqueReferences);
-    await store.setProject(alice, 'ws:notes');
+    await store.setProject(alice, 'chatgpt', 'ws:notes');
     await store.enable(alice);
     const assistant = fakeAssistant({
       references: opaqueReferences,
@@ -428,7 +429,7 @@ test('a conversation reference outside the assigned project pauses the contact i
     const bridge = bridgeOf(store, assistant, fakeChannel({ sendText: async () => { assert.fail('Must not reply'); } })); bridge.arm();
     bridge.receive(incoming('a')); await bridge.idle();
     assert.equal(store.route(alice.id)?.enabled, false);
-    assert.equal(store.route(alice.id)?.conversationRef, null);
+    assert.equal(store.route(alice.id)?.refs.chatgpt?.conversationRef, null);
     assert.match(store.route(alice.id)?.error ?? '', /does not belong/);
   });
 });

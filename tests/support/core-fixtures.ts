@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createJsonStatePersistence } from '../../src/adapters/storage/json-state.js';
 import { chatgptReferences } from '../../src/adapters/chatgpt/references.js';
-import type { AssistantAdapter, AssistantReferencePolicy, MessagingAdapter, ReplyBlock } from '../../src/core/contracts.js';
-import { RoutingState, type PersistedState, type StatePersistence } from '../../src/core/state.js';
+import type { Assistant, AssistantAdapter, AssistantReferencePolicy, MessagingAdapter, ReplyBlock } from '../../src/core/contracts.js';
+import { createFallbackAssistant } from '../../src/core/fallback.js';
+import { RoutingState, type PersistedState, type ProviderReferences, type StatePersistence } from '../../src/core/state.js';
 
 export const aliasPair = { alias: '123456789@lid', canonical: '14155551234@s.whatsapp.net' };
 export const projectA = `https://chatgpt.com/g/g-p-${'a'.repeat(32)}`;
@@ -39,9 +40,10 @@ export async function withDirectory(run: (directory: string) => Promise<void>, p
   try { await run(directory); } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
-/** Loads RoutingState from `<directory>/state.json` through the real JSON adapter. */
-export function loadState(directory: string, now?: () => number, references: AssistantReferencePolicy = chatgptReferences): Promise<RoutingState> {
-  return RoutingState.load(createJsonStatePersistence(directory), references, now);
+/** Loads RoutingState from `<directory>/state.json` through the real JSON adapter. A single policy is the policy of the `chatgpt` provider, the only one tests use unless they pass a map. */
+export function loadState(directory: string, now?: () => number, references: AssistantReferencePolicy | ProviderReferences = chatgptReferences): Promise<RoutingState> {
+  const map: ProviderReferences = 'normalizeProject' in references ? { chatgpt: references as AssistantReferencePolicy } : references as ProviderReferences;
+  return RoutingState.load(createJsonStatePersistence(directory), map, now);
 }
 
 /** In-memory persistence that records every write; `stored` is what a later load would read. */
@@ -61,7 +63,7 @@ export function replyText(blocks: ReplyBlock[]): string {
   return blocks.map(block => block.type === 'markdown' ? block.text : block.type === 'draft' ? [block.title, block.text].filter(Boolean).join('\n\n') : block.type === 'code' ? block.code : block.type === 'table' ? [block.header, ...block.rows].map(row => row.join(' | ')).join('\n') : `[${block.attachment.fileName}]`).join('\n\n');
 }
 
-export const providerNames = { channelName: 'WhatsApp', assistantName: 'ChatGPT' };
+export const providerNames = { channelName: 'WhatsApp' };
 
 /** Inert messaging adapter for core tests; override only what a test observes. */
 export function fakeChannel(overrides: Partial<MessagingAdapter> & { sendText?: (contactId: string, text: string) => Promise<void> } = {}): MessagingAdapter {
@@ -76,13 +78,22 @@ export function fakeChannel(overrides: Partial<MessagingAdapter> & { sendText?: 
   };
 }
 
-/** Inert assistant adapter for core tests; `reply` rejects unless a test supplies one. */
-export function fakeAssistant(overrides: Partial<AssistantAdapter> = {}): AssistantAdapter {
+/** Inert single-provider adapter (id `chatgpt`); `reply` rejects unless a test supplies one. */
+export function fakeAdapter(overrides: Partial<AssistantAdapter> = {}): AssistantAdapter {
   return {
+    id: 'chatgpt',
     references: chatgptReferences,
     start: async () => {}, stop: async () => {},
     listProjects: async () => [],
     reply: async () => { throw new Error('Unexpected prompt submission'); },
     ...overrides,
   };
+}
+
+/** The assistant the bridge and application talk to, over one fake `chatgpt` adapter and a single-provider setting: no fallback, nothing limited. */
+export function fakeAssistant(overrides: Partial<AssistantAdapter> = {}): Assistant {
+  return createFallbackAssistant({
+    adapters: [fakeAdapter(overrides)], logger: () => {},
+    port: { settings: () => ({ providers: ['chatgpt'], retriesBeforeFallback: 2, options: {} }), limitedUntil: () => null, markLimited: async () => {} },
+  });
 }

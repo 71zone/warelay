@@ -67,3 +67,31 @@ test('a turn that never mounts is reported as not found rather than waited on fo
   assert.deepEqual(await page.reveal('user-2'), { found: false });
   assert.equal(page.inspect('user-2').userId, null);
 });
+
+// Limit detection: the same inspection script reports a usage-limit notice from alerts, the composer's area and (while waiting for a turn) a short assistant turn.
+const limitSchema = z.object({ error: z.string().nullable(), limit: z.string().nullable(), text: z.string(), complete: z.boolean() });
+function limitOf(extra: string, answer = 'Answer 1', target: string | null = null) {
+  const { document } = parseHTML(`<main><section data-content-search-turn-key="turn-1"><div><h4 data-conversation-role="user">You said</h4><div data-chatgpt-search-message-ids="user-1">Question</div></div><div data-talvt-turn-state="complete"><div data-chatgpt-search-message-ids="assistant-1"><h4 data-conversation-role="assistant">ChatGPT said</h4><div data-markdown-text-style="assistant-message">${answer}</div></div><button aria-label="Copy">Copy</button></div></section>${extra}</main>`);
+  return limitSchema.parse(runInNewContext(`(${chatgptInspectionScript})(${JSON.stringify(target)})`, { document, location: { href: 'https://chatgpt.com/c/existing' } }));
+}
+
+test('a usage-limit alert is reported as the limit, not as an error; other alerts stay errors', () => {
+  assert.deepEqual(limitOf('<div role="alert">You\'ve hit the usage limit. Try again after 3:45 PM.</div>'), { error: null, limit: "You've hit the usage limit. Try again after 3:45 PM.", text: 'Answer 1', complete: true });
+  const other = limitOf('<div role="alert">Something went wrong.</div>');
+  assert.equal(other.error, 'Something went wrong.');
+  assert.equal(other.limit, null);
+});
+
+test('a notice in the composer area counts, a typed draft in the editor does not', () => {
+  const composer = (inner: string): string => `<form><div>${inner}</div><div contenteditable="true">I hit the usage limit again</div><button>Send</button></form>`;
+  assert.equal(limitOf(composer('<p>You\'ve reached your usage limit for today.</p>')).limit, "You've reached your usage limit for today.");
+  assert.equal(limitOf(composer('')).limit, null);
+});
+
+test('a short assistant turn that states the limit counts only while waiting for a turn, and is then not a completed reply', () => {
+  const notice = 'You have reached your usage limit. Try again in 2 hours.';
+  assert.equal(limitOf('', notice).limit, null);
+  assert.deepEqual(limitOf('', notice, 'user-1'), { error: null, limit: notice, text: '', complete: false });
+  const essay = `Here is how usage limits work: you reach your usage limit when the quota is exhausted, ${'and the details vary by plan. '.repeat(20)}`;
+  assert.equal(limitOf('', essay, 'user-1').limit, null);
+});

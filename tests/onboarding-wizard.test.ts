@@ -47,7 +47,7 @@ test('the journey connects WhatsApp, saves the first contact paused with its own
   await withConfig(async config => {
     const outcome = await run(config, [signedIn, ...chooseAlice, [/Project number/, '1'], [/Lifetime \(/, '12h'], [/Turn on automatic replies/, '']], { contacts: [alice], projects: [aliceProject] });
     const route = outcome.routes.route(alice.id);
-    assert.deepEqual([route?.enabled, route?.projectRef, route?.conversationTtlMinutes], [false, projectA, 720]);
+    assert.deepEqual([route?.enabled, route?.refs.chatgpt?.projectRef, route?.conversationTtlMinutes], [false, projectA, 720]);
     assert.deepEqual([outcome.running, outcome.armed, outcome.sent], [false, false, []]);
     assert.equal(outcome.marker?.stage, 'complete');
   });
@@ -80,7 +80,7 @@ test('a contact can be entered as an international number before any directory h
   await withConfig(async config => {
     const outcome = await run(config, [signedIn, [/contact now/, 'y'], [/Contact: part of a name/, '+1 415 555 1234'], [/Project number/, 'none'], [/Continue without one/, 'y'], [/Lifetime \(/, '3d'], [/Turn on automatic replies/, '']], { projects: [] });
     const route = outcome.routes.route('14155551234@s.whatsapp.net');
-    assert.deepEqual([route?.enabled, route?.projectRef, route?.conversationTtlMinutes], [false, null, 4320]);
+    assert.deepEqual([route?.enabled, route?.refs.chatgpt?.projectRef, route?.conversationTtlMinutes], [false, null, 4320]);
   });
 });
 
@@ -102,19 +102,19 @@ test('after a filtered project list, the number shown for a match chooses that p
     const projects = async (): Promise<Project[]> => { reads++; return catalog; };
     const outcome = await run(config, [...chooseAlice, [/Project number/, 'work', answerWithDisplayedNumber('Work plans')], [/Lifetime \(/, ''], [/Turn on automatic replies/, '']], { contacts: [alice], projects }, 'contact');
     assert.equal(reads, 1);
-    assert.equal(outcome.routes.route(alice.id)?.projectRef, d);
+    assert.equal(outcome.routes.route(alice.id)?.refs.chatgpt?.projectRef, d);
   });
 });
 
 test("another contact's project is refused, and the contact can be given a free one", async () => {
   await withConfig(async config => {
     const store = await loadState(config.dataDir);
-    await store.setProject(bob, projectA);
+    await store.setProject(bob, 'chatgpt', projectA);
     await store.enable(bob);
     await store.setRunning(true);
     const outcome = await run(config, [signedIn, ...chooseAlice, [/Project number/, '1', '2'], [/Lifetime \(/, ''], [/Turn on automatic replies/, 'yes']], { contacts: [alice, bob], projects: [aliceProject, bobProject] }, 'contact');
-    assert.equal(outcome.routes.route(alice.id)?.projectRef, projectB);
-    assert.equal(outcome.routes.route(bob.id)?.projectRef, projectA);
+    assert.equal(outcome.routes.route(alice.id)?.refs.chatgpt?.projectRef, projectB);
+    assert.equal(outcome.routes.route(bob.id)?.refs.chatgpt?.projectRef, projectA);
     assert.deepEqual([outcome.routes.route(alice.id)?.enabled, outcome.routes.route(bob.id)?.enabled, outcome.running], [false, true, false]);
   });
 });
@@ -129,7 +129,7 @@ test('rerunning setup pauses forwarding and never switches on contacts that were
 
     const configured = await run(config, [...chooseAlice, [/Project number/, '1'], [/Lifetime \(/, '']], { contacts: [alice, bob], projects: [aliceProject] }, 'contact');
     assert.deepEqual([configured.running, configured.armed], [false, false]);
-    assert.deepEqual([configured.routes.route(alice.id)?.enabled, configured.routes.route(alice.id)?.projectRef], [false, projectA]);
+    assert.deepEqual([configured.routes.route(alice.id)?.enabled, configured.routes.route(alice.id)?.refs.chatgpt?.projectRef], [false, projectA]);
     assert.equal(configured.routes.route(bob.id)?.enabled, true);
     assert.equal(configured.marker?.stage, 'complete');
   });

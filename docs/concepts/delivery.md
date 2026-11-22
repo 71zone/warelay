@@ -49,6 +49,17 @@ Containers the reader does not recognize (an input form, a box of one or two row
 
 **Table pictures.** The picture is a screenshot of the table element in the ChatGPT tab, taken through the page's own compositor (the Chrome DevTools `Page.captureScreenshot` call that BrowserOS exposes), at up to double density and 4000 pixels on the longest side. The tab is not raised or focused and no keys are pressed; only its scroll position changes. Before each capture the bridge checks that nothing (ChatGPT's header or composer, for instance) is drawn over the table, and refuses a table that its scroll container clips sideways, so a picture never shows a table cut off or covered. Any refusal or browser error is logged and the table is delivered as text, so a failed screenshot never costs the reply. At most four tables or cards per reply are pictured; later ones are sent as text.
 
+## Fallback assistants
+
+ChatGPT's usage limit should not leave a contact without answers. Under the Terminal dashboard's **O** key (or `state.json`, see [Local data](../reference/local-data.md#state-file-versions)) you choose the assistants in priority order, for example `chatgpt, claude`, and how many times a send that provably did not leave is retried before the next assistant takes over (default 2). A single assistant, the default, behaves exactly as before. Source: [`src/core/fallback.ts`](../../src/core/fallback.ts), [`src/core/handoff.ts`](../../src/core/handoff.ts), [`src/core/usage-limit.ts`](../../src/core/usage-limit.ts), [`src/adapters/claude/claude.ts`](../../src/adapters/claude/claude.ts).
+
+- **Per message, the first assistant not marked limited is used.** A provider's page script recognises its usage-limit notice (ChatGPT "You've hit the usage limit... try again after 3:45 PM", Claude "You've reached your usage limit... resets at 3 PM") and the reset time it shows is read in your local time zone (relative "in 2 hours", a clock time, a weekday or a date). The reset time is only understood from English wording; with no time shown, or a notice in another language, the assistant stays out for 30 minutes.
+- **Before the prompt was accepted** the same message goes straight to the next assistant, so nothing is lost and nothing is sent twice. The limited assistant is not tried again until its reset time has passed; then the primary is used again on its own. Limited-until times are saved, so a restart keeps them. The dashboard status shows `ChatGPT limited until 3:45 PM`.
+- **A send that did not leave** (tab or composer not ready) is retried the configured number of times, then the assistant is set aside for 30 minutes and the next one takes the message. The last assistant is never abandoned: its failures keep retrying as described below.
+- **After the prompt was accepted** it is never sent anywhere else. If the limit appears mid-reply, that reply fails as under "After acceptance" below, but the assistant is marked limited so the next message goes to the next one.
+- **All assistants limited:** nothing is sent; the contact gets one WhatsApp line naming the soonest reset (for example "ChatGPT and Claude have reached their usage limits or cannot answer right now. Try again after 3:45 PM."), the message is not replayed and the contact stays enabled.
+- **Handoff.** Each contact has a conversation on every assistant that served it. When a message goes to an assistant that has not seen the recent turns (a new conversation on a fallback, or the primary again after the fallback answered), its prompt starts with a framed transcript, "Earlier conversation, continue from it", of up to the last 8 turns and 6000 characters from the last 24 hours, then the new message. The transcript comes from a short text log the bridge keeps itself, not from the old page, and is never sent to WhatsApp. A contact whose conversations have all expired, or who has none yet, starts fresh with no transcript.
+
 ## Self-healing and errors
 
 The bridge repairs itself rather than waiting for you to press R or re-enable a session.
@@ -61,7 +72,7 @@ The bridge repairs itself rather than waiting for you to press R or re-enable a 
 
 Pausing prevents any pending WhatsApp reply from being sent but cannot retract a prompt already submitted to ChatGPT. Quitting disarms forwarding and waits for an in-progress browser operation to finish before closing.
 
-Login expiry, rate limits and verification challenges require manual attention in BrowserOS; the app does not bypass them or switch silently to an API. Browser automation can break when ChatGPT changes its UI. See [Troubleshooting](../runbooks/troubleshooting.md) and the [motivation and policy notice](motivation.md).
+Login expiry and verification challenges require manual attention in BrowserOS; the app does not bypass them or switch silently to an API. A usage limit is handled by the fallback assistants above, which are other web assistants driven the same way. Browser automation can break when ChatGPT or Claude change their UI. See [Troubleshooting](../runbooks/troubleshooting.md) and the [motivation and policy notice](motivation.md).
 
 ## Identity aliases
 

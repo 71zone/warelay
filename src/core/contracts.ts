@@ -46,12 +46,20 @@ export interface MessagingAdapter {
   sendReply(contactId: string, blocks: ReplyBlock[]): Promise<void>;
 }
 export interface Project { name: string; ref: string }
+/** Registry id of an assistant provider (see providers.ts). Providers are interchangeable: nothing in core assumes a fixed set. */
+export type ProviderId = string;
+/** What one contact holds on one provider. */
+export interface ProviderRefs { conversationRef: string | null; projectRef: string | null }
+/** One text turn of a contact's recent conversation, kept by the bridge so another provider can continue it. `provider` is the provider that handled it. */
+export interface Turn { role: 'user' | 'assistant'; provider: ProviderId; text: string; at: number }
 /** Provider-owned validation of opaque references. Core stores the returned canonical strings and never parses them. */
 export interface AssistantReferencePolicy {
   normalizeProject(ref: string): string;
   normalizeConversation(ref: string, projectRef: string | null): string;
 }
+/** One assistant provider driven through the browser. The router (fallback.ts) composes several behind {@link Assistant}. */
 export interface AssistantAdapter {
+  readonly id: ProviderId;
   readonly references: AssistantReferencePolicy;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -75,3 +83,42 @@ export interface AssistantAdapter {
  * the bridge retry on its own: any other failure may have reached the provider, and repeating it could duplicate the message.
  */
 export class NotSentError extends Error {}
+
+/**
+ * Thrown by an adapter when the provider shows its usage-limit message. `resetAt` is the epoch ms the provider says the limit lifts, null when it names none.
+ * Before the prompt was accepted the router moves on to the next provider with the same message; after acceptance the reply fails and only later messages move.
+ */
+export class UsageLimitError extends Error {
+  constructor(readonly provider: ProviderId, readonly resetAt: number | null, message: string) { super(message); }
+}
+/** Every configured provider is over its limit (or failing), so nothing was sent. `resetAt` is the soonest time one of them is usable again. */
+export class AllProvidersLimitedError extends Error {
+  constructor(message: string, readonly resetAt: number | null) { super(message); }
+}
+/** Provider order and fallback behaviour; persisted with the routing state. `providers[0]` is the primary. */
+export interface AssistantSettings {
+  providers: ProviderId[];
+  retriesBeforeFallback: number;
+  /** Per-provider options the registry declares (for example an account index), edited with the order and persisted with it. Absent key = provider default. */
+  options: Record<ProviderId, ProviderOptions>;
+}
+export type ProviderOptions = Record<string, string>;
+/** What the bridge talks to: the configured providers behind one fallback policy. */
+export interface Assistant {
+  start(): Promise<void>;
+  stop(): Promise<void>;
+  /** Project catalog of one provider (see {@link AssistantAdapter.listProjects}). */
+  listProjects(provider: ProviderId, signal?: AbortSignal): Promise<Project[]>;
+  reply(input: {
+    /** The contact's references on every provider; a provider missing from the map holds none. */
+    refs: Readonly<Record<ProviderId, ProviderRefs>>;
+    /** Recent turns of the contact, oldest first, used to continue the conversation on a provider that has not seen them. */
+    history: readonly Turn[];
+    text: string;
+    attachments: Attachment[];
+    /** A provider is about to receive the message (first choice or a fallback); its name is what logs and notices should say. */
+    onProvider: (provider: ProviderId) => void;
+    onConversation: (provider: ProviderId, ref: string) => Promise<void>;
+    onSubmitted: (provider: ProviderId) => Promise<void>;
+  }): Promise<{ provider: ProviderId; conversationRef: string; text: string; blocks?: ReplyBlock[] }>;
+}

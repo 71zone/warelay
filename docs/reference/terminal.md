@@ -10,7 +10,7 @@ description: Panels, keys, prompts, the project picker and what pausing does in 
 
 ## Panels
 
-- **Status bar.** The last confirmed WhatsApp and BrowserOS connection states, and whether forwarding is active.
+- **Status bar.** The last confirmed WhatsApp and BrowserOS connection states, whether forwarding is active, and the assistants in priority order. The one in use is green; an assistant that hit its usage limit shows `ChatGPT limited until 3:45 PM` until then.
 - **Directory.** Saved contacts and known chats. Views `1`, `2` and `3` below switch what it lists.
 - **Sessions.** Each configured contact, whether it has a saved, new or expired ChatGPT conversation, and its project and lifetime.
 - **Details.** The selected contact's JID, project, conversation lifetime, expiry time, conversation URL and any failure.
@@ -34,8 +34,9 @@ What each panel's data means: [Conversations](../concepts/conversations.md), [De
 | P | Pause all forwarding, retaining session selections |
 | A | Add an international phone number or a direct-contact JID |
 | B | Check that BrowserOS is reachable and a ChatGPT composer is available, without sending a prompt (a signed-out page can still show one; the project picker reports a signed-out login) |
-| G | Open the searchable ChatGPT project picker for the selected contact (see below) |
+| G | Open the searchable project picker for the selected contact: the primary assistant's projects, P/F6 for another assistant's (see below) |
 | T | Set the selected contact's fixed conversation lifetime: minutes, `90m`, `12h`, `3d` or `never`; empty means 24h |
+| O | Choose the assistants in priority order (`chatgpt, claude`; one name means no fallback) and the number of retries before falling back (0 to 10, default 2). Saved in `state.json`; see [Fallback assistants](../concepts/delivery.md#fallback-assistants) |
 | X | Restart wabgpt in the same terminal. It waits for any in-progress reply to finish, releases the data-directory lock, and a fresh process starts and resumes enabled sessions without pressing R. The new process picks up a rebuilt `dist/` or a changed config. WhatsApp allows one connection per linked device, so there is a gap of a few seconds while it relaunches; messages sent during the gap are forwarded once it reconnects. A message that arrives while the old process is still finishing a reply is not forwarded. |
 | Q or Ctrl-C | Quit and retain settings |
 
@@ -60,7 +61,8 @@ Press G to choose from your ChatGPT projects by name; you never paste a URL. The
 | Up / Down, PgUp / PgDn, Home / End | Move through the list from either mode; the mouse wheel and clicking a row also work (click a highlighted row again to assign it) |
 | Enter | Assign the highlighted project, or clear the project if "No project" is highlighted |
 | Tab | Switch between typing and list mode; in list mode J/K move, `/` returns to search, R refreshes and C highlights "No project" |
-| F5 or Ctrl-R | Reload the list from ChatGPT (also the Refresh button) |
+| F5 or Ctrl-R | Reload the list from the current assistant (also the Refresh button) |
+| F6 or P (list mode) | Switch to the next configured assistant's projects; each assistant keeps its own project for the contact |
 | Backspace / Ctrl-U | Edit / clear the search |
 | Esc | Cancel without changing anything |
 

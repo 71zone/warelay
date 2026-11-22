@@ -13,11 +13,12 @@ For the behavior these interfaces carry, see [delivery](../concepts/delivery.md)
 ## Layout and dependency rule
 
 ```
-src/core/            contracts.ts  application.ts  bridge.ts  state.ts  duration.ts  single-flight.ts
+src/core/            contracts.ts  application.ts  bridge.ts  state.ts  providers.ts  fallback.ts  handoff.ts  usage-limit.ts  duration.ts  single-flight.ts
 src/adapters/
   storage/           json-state.ts            StatePersistence on the filesystem
   whatsapp/          whatsapp.ts (factory), directory.ts, inbound/lifecycle helpers
   chatgpt/           chatgpt.ts (factory), references.ts, dom.ts, projects.ts
+  claude/            claude.ts (factory), references.ts, dom.ts, projects.ts
   browseros/         mcp.ts                   MCP transport shared by delivery and the project catalog
 src/interfaces/
   tui/               terminal dashboard
@@ -64,7 +65,8 @@ export interface AssistantReferencePolicy {
   normalizeProject(ref: string): string;
   normalizeConversation(ref: string, projectRef: string | null): string;
 }
-export interface AssistantAdapter {
+export interface AssistantAdapter {            // one provider; the router composes several behind `Assistant`
+  readonly id: ProviderId;                      // a ProviderInfo.id from core/providers.ts
   readonly references: AssistantReferencePolicy;
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -85,8 +87,8 @@ These are what the core's guarantees rest on. Tests in `tests/` exercise the exi
 
 - **Opaque ids and references.** The core stores `Contact.id`, `Project.ref` and conversation refs as strings and never parses them. Validation and canonicalization belong to the adapter's `AssistantReferencePolicy`. [`tests/support/core-fixtures.ts`](../../tests/support/core-fixtures.ts) has `opaqueReferences`, a deliberately non-URL scheme used to prove the core does not interpret references.
 - **Stable identity.** The same contact must always produce the same `id`. If a provider knows two ids for one person, report them through `identities()` / the identity callback as `{ alias, canonical }`; delivery keys and routes then merge by canonical id.
-- **No message bodies at rest.** The core persists ids, names, references and delivery status, not text. Do not add body logging or persistence.
-- **No replay of uncertain work.** `reply()` must throw if it cannot tell whether the prompt was accepted. The bridge pauses that route and never resubmits. Call `onConversation(ref)` as soon as a conversation reference exists so the core can persist it, and `onSubmitted()` only after the assistant has actually accepted the prompt: that is what triggers the read receipt.
+- **No message bodies at rest in adapters.** Adapters persist nothing. The core keeps ids, names, references, delivery status and, only for provider handoff, a short bounded text log per contact (see [Local data](../reference/local-data.md)). Do not add body logging or persistence.
+- **No replay of uncertain work.** `reply()` must throw if it cannot tell whether the prompt was accepted. The bridge pauses that route and never resubmits. Call `onConversation(ref)` as soon as a conversation reference exists so the core can persist it, and `onSubmitted()` only after the assistant has actually accepted the prompt: that is what triggers the read receipt. Throw `NotSentError` only when the prompt provably did not leave (the router retries it and then moves to the next provider), and `UsageLimitError(id, resetAt, message)` when the provider shows its usage-limit notice (`resetAt` from `parseResetAt` in `core/usage-limit.ts`, or null): before acceptance the router sends the same message to the next provider, after acceptance only later messages move.
 - **Complete project catalogs.** `listProjects()` returns the full, sorted, unique list or throws. A partial or falsely empty list is a bug; it must use its own connection so it never disturbs delivery. It receives an optional `AbortSignal`: when it aborts, stop any blocked transport or polling wait, drain your cleanup and settle, because `Application.close()` waits for an in-flight catalog and a catalog that ignores the signal can hold the data-directory lock. The first-run setup also uses this call as its proof of a real signed-in session.
 - **Pause is honored.** The core checks the route again before sending the reply; `sendText` should do no extra queuing or retrying.
 - **Receipts are independent.** `acknowledge` runs separately from the reply path. A slow or failed receipt must not delay a reply.
@@ -129,6 +131,7 @@ const references: AssistantReferencePolicy = {
 export function createEcho(): AssistantAdapter {
   let started = false;
   return {
+    id: 'echo',
     references,
     async start() { started = true; },
     async stop() { started = false; },
@@ -147,25 +150,28 @@ export function createEcho(): AssistantAdapter {
 }
 ```
 
-Wire it by replacing the assistant in [`src/bootstrap.ts`](../../src/bootstrap.ts):
+Register it in [`src/core/providers.ts`](../../src/core/providers.ts) (`PROVIDERS`: id, name and site origin) and add it to the adapter list in [`src/bootstrap.ts`](../../src/bootstrap.ts). The router (`createFallbackAssistant`) then offers it in the dashboard's assistant order, keeps a conversation and project per contact for it and falls back to it when an earlier provider is limited:
 
 ```ts
 import { createEcho } from './adapters/echo/echo.js';
 // in createApplication():
-const assistant = createEcho();   // instead of createChatGPT({ endpoint, logger })
-const store = await RoutingState.load(createJsonStatePersistence(config.dataDir), assistant.references);
+const adapters = [createChatGPT({ endpoint, logger, media }), createClaude({ endpoint, logger, media }), createEcho()];
+const store = await RoutingState.load(createJsonStatePersistence(config.dataDir), Object.fromEntries(adapters.map(adapter => [adapter.id, adapter.references])));
+const assistant = createFallbackAssistant({ adapters, port: store, logger });
 ```
 
-The `RoutingState` and every frontend work unchanged because they only see the contracts. Name the providers for users through the `Application` metadata (see below).
+The `RoutingState` and every frontend work unchanged because they only see the contracts. Provider names shown to users come from the registry (`providerName(id)`).
+
+A provider can declare options in its `PROVIDERS` entry (`options: [{ key, label }]`, for example which signed-in account to use). The dashboard's O key then asks for each chosen provider's options after the order, `state.json` saves them under `settings.options.<id>`, and the adapter factory should read them lazily (for example through a `() => ProviderOptions` getter backed by `RoutingState.settings()`), since the order and options change while the app runs. ChatGPT and Claude declare none today.
 
 ## Composition
 
 ```ts
 const application = new Application(
-  { configPath, channelName: 'WhatsApp', assistantName: 'ChatGPT' },   // names shown in logs and UI
-  store,        // RoutingState.load(persistence, assistant.references)
+  { configPath, channelName: 'WhatsApp' },   // channel name shown in logs and UI; assistant names come from the provider registry
+  store,        // RoutingState.load(persistence, { [provider id]: references, ... })
   channel,      // MessagingAdapter
-  assistant,    // AssistantAdapter
+  assistant,    // Assistant (createFallbackAssistant over the adapters)
 );
 ```
 
@@ -188,15 +194,15 @@ interface StatePersistence {
 }
 ```
 
-`RoutingState.load(persistence, references)` validates what `read()` returns and migrates the legacy v1 document to the current v2 schema in memory; nothing is written until validation succeeds. `createJsonStatePersistence(dataDir)` is the filesystem implementation (directory mode 0700, file mode 0600, temp file plus rename). When its first write replaces a document of a different schema version, it first copies the old document to `state.json.v<version>.bak` (mode 0600, never overwritten), so an upgraded v1 file is kept as `state.json.v1.bak` and a downgrade stays possible. A replacement must keep writes private and atomic, and must serialize concurrent writes. Business rules (unique project ownership, TTL, delivery journal) stay in `RoutingState`; do not reimplement them in an adapter. See [local data](../reference/local-data.md) for what the default implementation stores.
+`RoutingState.load(persistence, references)` validates what `read()` returns and migrates legacy v1 and v2 documents to the current v3 schema in memory (their conversations and projects become the `chatgpt` slot); nothing is written until validation succeeds. `references` maps every provider id that may appear in saved state to its reference policy. `createJsonStatePersistence(dataDir)` is the filesystem implementation (directory mode 0700, file mode 0600, temp file plus rename). When its first write replaces a document of a different schema version, it first copies the old document to `state.json.v<version>.bak` (mode 0600, never overwritten), so an upgraded v2 file is kept as `state.json.v2.bak` and a downgrade stays possible. A replacement must keep writes private and atomic, and must serialize concurrent writes. Business rules (unique project ownership, TTL, delivery journal) stay in `RoutingState`; do not reimplement them in an adapter. See [local data](../reference/local-data.md) for what the default implementation stores.
 
 ## Adding a frontend
 
 Depend only on `Application`:
 
-- Read `application.snapshot()` (`routes`, `contacts`, `directory`, `chats`, `armed`, `channelStatus`, `assistantStatus`).
+- Read `application.snapshot()` (`routes`, `contacts`, `directory`, `chats`, `armed`, `channelStatus`, `assistantStatus`, `assistant`).
 - Subscribe to `change`, `log` and `qr` events and remove listeners on shutdown.
-- Mutate through `login()`, `checkBrowser()`, `resume()`, `pause()`, `toggle(contact)`, `setContactEnabled(contact, boolean)`, `resolveContact(input)` (non-mutating lookup; it never enables or saves anything), `addContact(input)` (resolves, then enables), `listProjects(signal?)`, `setProject(contact, ref | null)`, `setConversationTtl(contact, minutes | null)` and `close()`. `parseConversationTtl` / `formatConversationTtl` in [`core/duration.ts`](../../src/core/duration.ts) are shared by the TUI and HTTP frontends.
+- Mutate through `login()`, `checkBrowser()`, `resume()`, `pause()`, `toggle(contact)`, `setContactEnabled(contact, boolean)`, `resolveContact(input)` (non-mutating lookup; it never enables or saves anything), `addContact(input)` (resolves, then enables), `listProjects(provider?, signal?)`, `setProject(contact, ref | null, provider?)`, `setAssistantSettings({ providers, retriesBeforeFallback })`, `setConversationTtl(contact, minutes | null)` and `close()`. `parseConversationTtl` / `formatConversationTtl` in [`core/duration.ts`](../../src/core/duration.ts) are shared by the TUI and HTTP frontends.
 - Call `application.restore()` after you are subscribed, so early QR codes and status changes are not missed.
 - Do not close the application from a frontend that did not create the runtime; the creator of the runtime owns `close()`.
 

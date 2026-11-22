@@ -47,6 +47,8 @@ The first launch creates `~/.wa-chatgpt/config.json` (directory mode 0700, file 
 
 Unknown keys, at the top level or inside `server`, are rejected: a file that does not load is never written back. Copy the actual local MCP URL from BrowserOS Neo's connection settings if yours differs, and connect only to a local server you trust.
 
+The assistant order (ChatGPT, Claude) and the retries before falling back are **not** config keys: the dashboard's O key changes them at runtime and they are saved in `state.json` ([Local data](local-data.md#state-file-versions)). All assistants share the one `browserMcpUrl`: sign in to each (chatgpt.com, claude.ai) in that BrowserOS profile.
+
 ### Paths
 
 - A leading `~/` (or a bare `~`) expands to your home directory.

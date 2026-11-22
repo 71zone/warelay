@@ -23,6 +23,10 @@ Each contact can be bound to a ChatGPT project, chosen by name from a live list 
 - **Not while busy.** A project cannot be changed while that contact's message is being processed.
 - **Never enables forwarding.** Configuring a project leaves the contact paused until you enable it. Enabling explicitly allows their incoming text to be shared with ChatGPT and ChatGPT's response to be sent from your WhatsApp account; the app forwards the original text without extra system instructions.
 
+## Several assistants
+
+With [fallback assistants](delivery.md#fallback-assistants) configured, a contact holds one saved conversation, and one optional project, **per assistant**. A reference belongs to the assistant whose site it points at (`https://chatgpt.com/...`, `https://claude.ai/chat/<id>` or `https://claude.ai/project/<id>`); the picker (G) lists the projects of the primary assistant and P (F6) cycles to the next one. Conversation lifetime and expiry apply to each assistant's conversation from its own start. Setting a project on one assistant leaves the others untouched. Older saved ChatGPT conversations and projects migrate to ChatGPT's slot unchanged.
+
 ## Lifetime
 
 Each contact has a fixed conversation lifetime. The default is 24 hours; `never` disables expiry. Accepted forms are minutes (`90`, `90m`), hours (`12h`) and days (`3d`), a whole number of minutes between 1 minute and 3650 days, or `never`; empty input means 24 hours.

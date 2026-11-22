@@ -45,7 +45,7 @@ async function confirmChatGPT({ application, io, signal, viewerUrl }: Context): 
   await ask(io, 'Press Enter when you are signed in and wabgpt should check: ');
   for (;;) {
     try {
-      const projects = await abortable(application.listProjects(signal), signal);
+      const projects = await abortable(application.listProjects(undefined, signal), signal);
       io.write(`Signed in to ChatGPT: ${projects.length} project${projects.length === 1 ? '' : 's'} found.\n`);
       return;
     } catch (error) {
@@ -181,9 +181,9 @@ async function chooseProject(context: Context, contact: Contact): Promise<Projec
     const routes = application.snapshot().routes;
     const route = routes.find(item => item.contactId === contact.id);
     const owners = new Map<string, Route>();
-    for (const item of routes) if (item.projectRef) owners.set(item.projectRef, item);
+    for (const item of routes) { const ref = application.projectRef(item); if (ref) owners.set(ref, item); }
     if (catalog === null) {
-      try { catalog = await abortable(application.listProjects(signal), signal); }
+      try { catalog = await abortable(application.listProjects(undefined, signal), signal); }
       catch (error) {
         if (signal.aborted) throw new OnboardingCancelled();
         io.write(`Could not read your ChatGPT projects: ${errorText(error)}\n`);
@@ -195,11 +195,11 @@ async function chooseProject(context: Context, contact: Contact): Promise<Projec
       catalog.slice(0, PROJECT_LIST_LIMIT).forEach((project, index) => io.write(projectLine(project, index, owners.get(project.ref), contact)));
       if (catalog.length > PROJECT_LIST_LIMIT) io.write(`  …and ${catalog.length - PROJECT_LIST_LIMIT} more; type part of a name to find them.\n`);
     }
-    const hint = route?.projectRef ? 'Enter keeps the current project, ' : '';
+    const hint = application.projectRef(route) ? 'Enter keeps the current project, ' : '';
     const answer = await ask(io, `Project number or part of its name (${hint}r reloads, 'none' for no project): `);
     const lower = answer.toLowerCase();
     if (!answer) {
-      if (route?.projectRef) return { kind: 'keep' };
+      if (application.projectRef(route)) return { kind: 'keep' };
       io.write('Choose a project, or type none to continue without one.\n');
       continue;
     }
@@ -240,7 +240,7 @@ async function saveProject(context: Context, contact: Contact): Promise<void> {
     const choice = await chooseProject(context, contact);
     if (choice.kind === 'keep') return;
     try {
-      const current = routeOf(application.snapshot(), contact)?.projectRef ?? null;
+      const current = application.projectRef(routeOf(application.snapshot(), contact));
       if (choice.ref !== current) await application.setProject(contact, choice.ref);
       return;
     } catch (error) { io.write(`${errorText(error)}\n`); }

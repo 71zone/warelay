@@ -1,4 +1,5 @@
 import type { AssistantReferencePolicy } from '../../core/contracts.js';
+import type { Destination } from '../browseros/assistant.js';
 
 // ChatGPT's reference format is its canonical URL: a project ref is https://chatgpt.com/g/g-p-<32 hex>, a conversation ref is /c/<id> optionally scoped by that project.
 const origin = 'https://chatgpt.com';
@@ -6,8 +7,6 @@ const projectSegment = 'g-p-[0-9a-fA-F]{32}';
 const slugSegment = '(?:-[A-Za-z0-9_%.~-]*)?';
 const projectPath = new RegExp(`^/g/(${projectSegment})${slugSegment}(?:/project)?/?$`);
 const conversationPath = new RegExp(`^(?:/g/(${projectSegment})${slugSegment})?/c/([A-Za-z0-9-]+)$`);
-
-export interface Destination { conversationUrl: string | null; projectUrl: string | null }
 
 function chatgptUrl(value: string, label: string): URL {
   const text = value.trim();

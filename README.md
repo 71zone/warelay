@@ -36,6 +36,8 @@ wabgpt setup
 
 Rerunning setup pauses forwarding. Recipients use WhatsApp; the owner handles installation, browser login and configuration.
 
+If ChatGPT's usage limit is a problem, press O in the dashboard to add Claude (claude.ai, signed in inside the same BrowserOS) as a fallback: the next assistant takes over until the first one's limit resets, then the primary is used again. See [fallback assistants](docs/concepts/delivery.md#fallback-assistants).
+
 ## Documentation
 
 The detailed docs form an [Open Knowledge Format v0.2 bundle](docs/index.md).

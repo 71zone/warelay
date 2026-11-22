@@ -5,7 +5,7 @@ import { access, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { resolveBlocks, type AssetContext } from '../src/adapters/chatgpt/assets.js';
+import { resolveBlocks, type AssetContext } from '../src/adapters/browseros/assets.js';
 import type { Extraction } from '../src/adapters/chatgpt/extract.js';
 import { MAX_MEDIA_BYTES, createMediaStore } from '../src/infrastructure/media.js';
 
@@ -41,7 +41,7 @@ function fakePage(sources: Map<number, Source>): { context: AssetContext; calls:
     calls.push('release'); released.push(z.number().parse(raw));
     return true;
   };
-  const context: AssetContext = { run, pageId: 7, logger: message => { calls.push(`log:${message}`); }, media: { directory, allocate: async name => { const path = await store.allocate(name); allocated.push(path); return path; } } };
+  const context: AssetContext = { run, pageId: 7, provider: 'ChatGPT', logger: message => { calls.push(`log:${message}`); }, media: { directory, allocate: async name => { const path = await store.allocate(name); allocated.push(path); return path; } } };
   return { context, calls, released, allocated, directory };
 }
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { setImmediate as tick } from 'node:timers/promises';
 import { join } from 'node:path';
 import { Application } from '../src/core/application.js';
-import type { AssistantAdapter, MessagingAdapter, Project } from '../src/core/contracts.js';
+import type { Assistant, MessagingAdapter, Project } from '../src/core/contracts.js';
 import type { RoutingState } from '../src/core/state.js';
 import { fakeAssistant, fakeChannel, loadState, opaqueReferences, providerNames, withDirectory } from './support/core-fixtures.js';
 
@@ -11,24 +11,24 @@ const contact = { id: '14155551234@s.whatsapp.net', name: 'Saved contact' };
 const channel = fakeChannel({ contacts: () => [contact], sendText: async () => { assert.fail('No message should be sent by application restoration'); } });
 const assistant = fakeAssistant({ reply: async () => { throw new Error('No prompt should be submitted by application restoration'); } });
 const metadataFor = (directory: string) => ({ configPath: join(directory, 'config.json'), ...providerNames });
-const appOf = (directory: string, store: RoutingState, messaging: MessagingAdapter = channel, backend: AssistantAdapter = assistant): Application => new Application(metadataFor(directory), store, messaging, backend);
+const appOf = (directory: string, store: RoutingState, messaging: MessagingAdapter = channel, backend: Assistant = assistant): Application => new Application(metadataFor(directory), store, messaging, backend);
 
 test('active sessions resume with their conversation, while a global pause survives subsequent restarts', async () => {
   await withDirectory(async directory => {
     const initial = await loadState(directory);
     await initial.enable(contact);
-    await initial.conversation(contact.id, 'https://chatgpt.com/c/retained');
+    await initial.conversation(contact.id, 'chatgpt', 'https://chatgpt.com/c/retained');
     await initial.setRunning(true);
     const restored = appOf(directory, await loadState(directory));
     await restored.restore();
     assert.equal(restored.snapshot().armed, true);
-    assert.equal(restored.snapshot().routes[0]?.conversationRef, 'https://chatgpt.com/c/retained');
+    assert.equal(restored.snapshot().routes[0]?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/retained');
     await restored.pause(); await restored.close();
     const paused = appOf(directory, await loadState(directory));
     await paused.restore();
     assert.equal(paused.snapshot().armed, false);
     assert.equal(paused.snapshot().routes[0]?.enabled, true);
-    assert.equal(paused.snapshot().routes[0]?.conversationRef, 'https://chatgpt.com/c/retained');
+    assert.equal(paused.snapshot().routes[0]?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/retained');
     await paused.close();
   }, 'wabgpt-app-');
 });
@@ -55,13 +55,13 @@ test('configuring a project and lifetime saves a paused route, emits changes, an
     await app.setConversationTtl(contact, null);
     assert.ok(changes >= 2);
     const [route] = app.snapshot().routes;
-    assert.deepEqual([route?.enabled, route?.projectRef, route?.conversationTtlMinutes, route?.conversationRef], [false, project, null, null]);
+    assert.deepEqual([route?.enabled, route?.refs.chatgpt?.projectRef, route?.conversationTtlMinutes, route?.refs.chatgpt?.conversationRef], [false, project, null, null]);
     assert.equal(app.snapshot().armed, false);
     const restored = await loadState(directory);
     assert.equal(restored.isRunning(), false);
-    assert.equal(restored.route(contact.id)?.projectRef, project);
+    assert.equal(restored.route(contact.id)?.refs.chatgpt?.projectRef, project);
     await app.setProject(contact, null);
-    assert.equal(app.snapshot().routes[0]?.projectRef, null);
+    assert.equal(app.snapshot().routes[0]?.refs.chatgpt?.projectRef, null);
     await app.close();
   }, 'wabgpt-app-');
 });
@@ -73,7 +73,7 @@ test('configuration is rejected while a delivery is working and then leaves the 
     const app = appOf(directory, store);
     await assert.rejects(app.setProject(contact, `https://chatgpt.com/g/g-p-${'c'.repeat(32)}`), /delivered/);
     await assert.rejects(app.setConversationTtl(contact, 5), /delivered/);
-    assert.equal(app.snapshot().routes[0]?.projectRef, null);
+    assert.equal(app.snapshot().routes[0]?.refs.chatgpt?.projectRef, null);
     assert.equal(app.snapshot().routes[0]?.conversationTtlMinutes, 1440);
     await app.close();
   }, 'wabgpt-app-');
@@ -242,9 +242,9 @@ test('an application backed by a non-URL reference policy assigns projects and l
     const app = appOf(directory, store, channel, fakeAssistant({ references: opaqueReferences }));
     await app.setProject(contact, 'ws:Research');
     await app.setConversationTtl(contact, 90);
-    assert.deepEqual(app.snapshot().routes.map(route => [route.projectRef, route.conversationTtlMinutes, route.enabled]), [['ws:research', 90, false]]);
+    assert.deepEqual(app.snapshot().routes.map(route => [route.refs.chatgpt?.projectRef, route.conversationTtlMinutes, route.enabled]), [['ws:research', 90, false]]);
     await assert.rejects(app.setProject(contact, 'https://chatgpt.com/g/g-p-' + 'a'.repeat(32)), /ws:<name>/);
-    assert.equal((await loadState(directory, () => 2, opaqueReferences)).route(contact.id)?.projectRef, 'ws:research');
+    assert.equal((await loadState(directory, () => 2, opaqueReferences)).route(contact.id)?.refs.chatgpt?.projectRef, 'ws:research');
     await app.close();
   }, 'wabgpt-app-');
 });
@@ -280,7 +280,7 @@ test('addContact keeps a saved route name when the provider directory is empty, 
 });
 
 /** An assistant whose catalog honours its signal: on abort it finishes asynchronous cleanup, records it, and only then rejects. */
-function cancellableCatalog(): { assistant: AssistantAdapter; signals: AbortSignal[]; cleaned: () => number } {
+function cancellableCatalog(): { assistant: Assistant; signals: AbortSignal[]; cleaned: () => number } {
   const signals: AbortSignal[] = [];
   let cleaned = 0;
   const assistant = fakeAssistant({
@@ -301,7 +301,7 @@ test('a catalog caller that aborts is rejected with its reason only after the ad
     const app = appOf(directory, await loadState(directory), channel, cancellable);
     const controller = new AbortController();
     const reason = new Error('setup cancelled');
-    const first = app.listProjects(controller.signal);
+    const first = app.listProjects(undefined, controller.signal);
     const settled = assert.rejects(first, error => error === reason);
     assert.equal(signals.length, 1);
     controller.abort(reason);
@@ -310,7 +310,7 @@ test('a catalog caller that aborts is rejected with its reason only after the ad
     await settled;
     assert.equal(cleaned(), 1);
     // The cancelled lookup is never joined; a new one starts its own read with its own signal.
-    const second = app.listProjects(new AbortController().signal);
+    const second = app.listProjects(undefined, new AbortController().signal);
     assert.equal(signals.length, 2);
     assert.notEqual(signals[1], signals[0]);
     assert.equal(signals[1]?.aborted, false);
@@ -326,7 +326,7 @@ test('one caller aborting does not cancel a catalog another caller still waits f
     const { assistant: cancellable, signals, cleaned } = cancellableCatalog();
     const app = appOf(directory, await loadState(directory), channel, cancellable);
     const a = new AbortController(); const b = new AbortController();
-    const first = app.listProjects(a.signal); const second = app.listProjects(b.signal);
+    const first = app.listProjects(undefined, a.signal); const second = app.listProjects(undefined, b.signal);
     assert.equal(signals.length, 1);
     const firstRejected = assert.rejects(first, /first left/);
     a.abort(new Error('first left'));
@@ -348,7 +348,7 @@ test('a caller without a signal keeps the catalog alive when a signalled caller 
     const app = appOf(directory, await loadState(directory), fakeChannel({ stop: async () => { stops.push(`channel:${cleaned()}`); } }), { ...cancellable, stop: async () => { stops.push(`assistant:${cleaned()}`); } });
     const leaving = new AbortController();
     const pinned = app.listProjects();
-    const signalled = app.listProjects(leaving.signal);
+    const signalled = app.listProjects(undefined, leaving.signal);
     const signalledRejected = assert.rejects(signalled, /left/);
     leaving.abort(new Error('left'));
     await signalledRejected;
@@ -366,7 +366,7 @@ test('an already aborted signal is rejected without touching the adapter', async
   await withDirectory(async directory => {
     const { assistant: cancellable, signals } = cancellableCatalog();
     const app = appOf(directory, await loadState(directory), channel, cancellable);
-    await assert.rejects(app.listProjects(AbortSignal.abort(new Error('already cancelled'))), /already cancelled/);
+    await assert.rejects(app.listProjects(undefined, AbortSignal.abort(new Error('already cancelled'))), /already cancelled/);
     assert.equal(signals.length, 0);
     await app.close();
   }, 'wabgpt-app-');

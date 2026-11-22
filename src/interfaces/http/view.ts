@@ -1,6 +1,6 @@
 import type { Application } from '../../core/application.js';
 import { formatConversationTtl } from '../../core/duration.js';
-import { DEFAULT_CONVERSATION_TTL_MINUTES } from '../../core/state.js';
+import { DEFAULT_CONVERSATION_TTL_MINUTES, currentSlot, slotOf } from '../../core/state.js';
 
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
 
@@ -37,6 +37,8 @@ export interface ContactView {
 
 export interface StateView {
   app: { channelName: string; assistantName: string };
+  /** Assistants in priority order (first = primary); `limitedUntil` is set while one is out of rotation. */
+  assistant: { providers: { id: string; name: string; limitedUntil: number | null }[]; retriesBeforeFallback: number };
   armed: boolean;
   channelStatus: string;
   assistantStatus: string;
@@ -50,6 +52,7 @@ export interface ActivityEntry { id: number; at: number; message: string }
 
 export function buildState(application: Application, now = Date.now()): StateView {
   const snapshot = application.snapshot();
+  const order = snapshot.assistant.providers;
   const routes = new Map(snapshot.routes.map(route => [route.contactId, route]));
   const saved = new Set(snapshot.contacts.map(contact => contact.id));
   const chats = new Map(snapshot.chats.map(chat => [chat.id, chat]));
@@ -57,8 +60,9 @@ export function buildState(application: Application, now = Date.now()): StateVie
     const route = routes.get(contact.id);
     const chat = chats.get(contact.id);
     const ttlMinutes = route ? route.conversationTtlMinutes : DEFAULT_CONVERSATION_TTL_MINUTES;
-    const active = route?.conversationRef != null;
-    const startedAt = route?.conversationStartedAt ?? null;
+    const held = route ? currentSlot(route, order) : null;
+    const active = held?.slot.conversationRef != null;
+    const startedAt = held?.slot.startedAt ?? null;
     const expiresAt = active && ttlMinutes !== null && startedAt !== null ? startedAt + ttlMinutes * 60_000 : null;
     return {
       id: contact.id,
@@ -66,7 +70,7 @@ export function buildState(application: Application, now = Date.now()): StateVie
       enabled: route?.enabled === true,
       hasRoute: route !== undefined,
       error: route?.error ? publicMessage(route.error, 'Forwarding stopped.') : null,
-      projectRef: route?.projectRef ?? null,
+      projectRef: route ? slotOf(route, order[0] ?? '').projectRef : null,
       ttlMinutes,
       ttl: formatConversationTtl(ttlMinutes),
       conversation: { active, startedAt, expiresAt, expired: expiresAt !== null && now >= expiresAt },
@@ -77,7 +81,8 @@ export function buildState(application: Application, now = Date.now()): StateVie
     };
   });
   return {
-    app: { channelName: visibleText(application.metadata.channelName, 60), assistantName: visibleText(application.metadata.assistantName, 60) },
+    app: { channelName: visibleText(application.metadata.channelName, 60), assistantName: visibleText(application.assistantName(), 60) },
+    assistant: { providers: snapshot.assistant.providerViews.map(view => ({ id: view.id, name: visibleText(view.name, 60), limitedUntil: view.limitedUntil })), retriesBeforeFallback: snapshot.assistant.retriesBeforeFallback },
     armed: snapshot.armed,
     channelStatus: publicMessage(snapshot.channelStatus, 'unknown'),
     assistantStatus: publicMessage(snapshot.assistantStatus, 'unknown'),
@@ -90,11 +95,12 @@ export function buildState(application: Application, now = Date.now()): StateVie
 export interface ProjectView { name: string; ref: string; owner: { id: string; name: string } | null }
 
 /** Catalog from the assistant plus the contact (if any) that already owns each project, so the picker can disable taken ones. */
-export async function buildProjects(application: Application): Promise<ProjectView[]> {
-  const catalog = await application.listProjects();
+export async function buildProjects(application: Application, provider?: string): Promise<ProjectView[]> {
+  const catalog = await application.listProjects(provider);
   const owners = new Map<string, { id: string; name: string }>();
   for (const route of application.snapshot().routes) {
-    if (route.projectRef) owners.set(route.projectRef, { id: route.contactId, name: visibleText(route.name, 120) || route.contactId });
+    const ref = application.projectRef(route, provider);
+    if (ref) owners.set(ref, { id: route.contactId, name: visibleText(route.name, 120) || route.contactId });
   }
   return catalog.map(project => ({ name: visibleText(project.name, 200) || 'Untitled project', ref: project.ref, owner: owners.get(project.ref) ?? null }));
 }

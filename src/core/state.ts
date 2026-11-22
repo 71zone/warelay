@@ -1,24 +1,51 @@
 import { z } from 'zod';
-import type { AssistantReferencePolicy, Contact, IdentityAlias } from './contracts.js';
+import type { AssistantReferencePolicy, AssistantSettings, Contact, IdentityAlias, ProviderId, Turn } from './contracts.js';
+import { DEFAULT_RETRIES_BEFORE_FALLBACK, LEGACY_PROVIDER, MAX_RETRIES_BEFORE_FALLBACK, providerName, providerOptionSpecs } from './providers.js';
 
 export const DEFAULT_CONVERSATION_TTL_MINUTES = 1440;
-const CURRENT_VERSION = 2;
+const CURRENT_VERSION = 3;
+/** Recent turns kept per contact for provider handoff, and the longest text kept per turn. */
+const MAX_TURNS = 16;
+const MAX_TURN_CHARS = 2000;
 
 const ttlSchema = z.number().int().positive().refine(minutes => Number.isSafeInteger(minutes * 60_000), 'Conversation lifetime is out of range.');
 const timestampSchema = z.number().int().nonnegative();
 const deliveryStatus = z.enum(['working', 'done', 'failed']);
 
+/** What a contact holds on one provider: its saved conversation (with the time it started), and the project new conversations start in. */
+const slotSchema = z.object({ conversationRef: z.string().min(1).nullable(), projectRef: z.string().min(1).nullable(), startedAt: timestampSchema.nullable() });
 const routeSchema = z.object({
   contactId: z.string().min(1), name: z.string(), enabled: z.boolean(),
-  conversationRef: z.string().min(1).nullable(), projectRef: z.string().min(1).nullable(),
-  conversationTtlMinutes: ttlSchema.nullable(), conversationStartedAt: timestampSchema.nullable(),
-  error: z.string().nullable(),
+  conversationTtlMinutes: ttlSchema.nullable(), error: z.string().nullable(),
+  refs: z.record(z.string().min(1), slotSchema),
 });
 const deliverySchema = z.object({ key: z.string(), contactId: z.string().min(1), status: deliveryStatus });
+const aliasesSchema = z.array(z.object({ alias: z.string().min(1), canonical: z.string().min(1) }));
+const turnSchema = z.object({ role: z.enum(['user', 'assistant']), provider: z.string().min(1), text: z.string(), at: timestampSchema });
+const settingsSchema = z.object({
+  providers: z.array(z.string().min(1)).min(1), retriesBeforeFallback: z.number().int().min(0).max(MAX_RETRIES_BEFORE_FALLBACK),
+  options: z.record(z.string().min(1), z.record(z.string().min(1), z.string())).default({}),
+});
 const stateSchema = z.object({
   version: z.literal(CURRENT_VERSION), running: z.boolean(),
-  aliases: z.array(z.object({ alias: z.string().min(1), canonical: z.string().min(1) })),
+  aliases: aliasesSchema,
   routes: z.array(routeSchema), deliveries: z.array(deliverySchema),
+  settings: settingsSchema,
+  /** Epoch ms until which a provider is out of rotation (usage limit or repeated failure). */
+  limits: z.record(z.string().min(1), timestampSchema),
+  /** Text of each contact's last few turns, only so another provider can continue the conversation. Keyed by canonical contact id. */
+  turns: z.record(z.string().min(1), z.array(turnSchema)),
+});
+
+/** Version 2 held one conversation and project per contact, all on ChatGPT. It is read, never written. */
+const stateV2Schema = z.object({
+  version: z.literal(2), running: z.boolean(), aliases: aliasesSchema,
+  routes: z.array(z.object({
+    contactId: z.string().min(1), name: z.string(), enabled: z.boolean(),
+    conversationRef: z.string().min(1).nullable(), projectRef: z.string().min(1).nullable(),
+    conversationTtlMinutes: ttlSchema.nullable(), conversationStartedAt: timestampSchema.nullable(), error: z.string().nullable(),
+  })),
+  deliveries: z.array(deliverySchema),
 });
 
 /** Version 1 was the WhatsApp/ChatGPT-only shape. It is read, never written. */
@@ -35,6 +62,7 @@ const legacyStateSchema = z.object({
 });
 
 export type Route = z.infer<typeof routeSchema>;
+export type ProviderSlot = z.infer<typeof slotSchema>;
 export type Delivery = z.infer<typeof deliverySchema>;
 export type PersistedState = z.infer<typeof stateSchema>;
 /** Storage port. `read` returns the raw stored document or undefined when nothing is stored yet; `write` replaces it atomically. */
@@ -42,6 +70,20 @@ export interface StatePersistence {
   read(): Promise<unknown | undefined>;
   write(state: PersistedState): Promise<void>;
 }
+/** Reference validation per provider id. Every provider that may appear in saved state must be listed. */
+export type ProviderReferences = Readonly<Record<ProviderId, AssistantReferencePolicy>>;
+
+const emptySlot = (): ProviderSlot => ({ conversationRef: null, projectRef: null, startedAt: null });
+/** The contact's slot on `provider`; an empty one when it holds nothing there. */
+export function slotOf(route: Pick<Route, 'refs'>, provider: ProviderId): ProviderSlot { return route.refs[provider] ?? emptySlot(); }
+/** True when the contact has a saved conversation on any provider. */
+export function hasConversation(route: Pick<Route, 'refs'>): boolean { return Object.values(route.refs).some(slot => slot.conversationRef !== null); }
+/** The slot to show for a contact: the first provider in `order` that holds a conversation, else the first provider (the primary) with its empty or project-only slot. */
+export function currentSlot(route: Pick<Route, 'refs'>, order: readonly ProviderId[]): { provider: ProviderId; slot: ProviderSlot } {
+  const provider = order.find(id => slotOf(route, id).conversationRef !== null) ?? order[0] ?? '';
+  return { provider, slot: slotOf(route, provider) };
+}
+const defaultSettings = (): AssistantSettings => ({ providers: [LEGACY_PROVIDER], retriesBeforeFallback: DEFAULT_RETRIES_BEFORE_FALLBACK, options: {} });
 
 function describe(error: z.ZodError): string {
   return error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
@@ -51,20 +93,29 @@ function describe(error: z.ZodError): string {
 function parseStored(raw: unknown): PersistedState {
   const version = typeof raw === 'object' && raw !== null && 'version' in raw ? raw.version : undefined;
   try {
-    if (version === 1) {
-      const legacy = legacyStateSchema.parse(raw);
+    if (version === 1 || version === 2) {
+      let old: z.infer<typeof stateV2Schema>;
+      if (version === 1) {
+        const legacy = legacyStateSchema.parse(raw);
+        old = {
+          version: 2, running: legacy.running,
+          aliases: legacy.aliases.map(({ lid, pn }) => ({ alias: lid, canonical: pn })),
+          routes: legacy.routes.map(route => ({
+            contactId: route.jid, name: route.name, enabled: route.enabled,
+            conversationRef: route.conversationUrl, projectRef: route.projectUrl,
+            conversationTtlMinutes: route.conversationTtlMinutes, conversationStartedAt: route.conversationStartedAt, error: route.error,
+          })),
+          deliveries: legacy.deliveries.map(({ key, jid, status }) => ({ key, contactId: jid, status })),
+        };
+      } else old = stateV2Schema.parse(raw);
+      // Everything saved before providers existed belongs to ChatGPT.
       return stateSchema.parse({
-        version: CURRENT_VERSION, running: legacy.running,
-        aliases: legacy.aliases.map(({ lid, pn }) => ({ alias: lid, canonical: pn })),
-        routes: legacy.routes.map(route => ({
-          contactId: route.jid, name: route.name, enabled: route.enabled,
-          conversationRef: route.conversationUrl, projectRef: route.projectUrl,
-          conversationTtlMinutes: route.conversationTtlMinutes, conversationStartedAt: route.conversationStartedAt, error: route.error,
-        })),
-        deliveries: legacy.deliveries.map(({ key, jid, status }) => ({ key, contactId: jid, status })),
+        version: CURRENT_VERSION, running: old.running, aliases: old.aliases,
+        routes: old.routes.map(({ conversationRef, projectRef, conversationStartedAt, ...route }) => ({ ...route, refs: { [LEGACY_PROVIDER]: { conversationRef, projectRef, startedAt: conversationStartedAt } } })),
+        deliveries: old.deliveries, settings: defaultSettings(), limits: {}, turns: {},
       });
     }
-    if (version !== CURRENT_VERSION) throw new Error(`Unsupported saved state version ${String(version)}. This build reads versions 1 and ${CURRENT_VERSION}.`);
+    if (version !== CURRENT_VERSION) throw new Error(`Unsupported saved state version ${String(version)}. This build reads versions 1 to ${CURRENT_VERSION}.`);
     return stateSchema.parse(raw);
   } catch (error) {
     if (error instanceof z.ZodError) throw new Error(`Saved state is invalid: ${describe(error)}`);
@@ -86,17 +137,24 @@ function aliasMap(aliases: IdentityAlias[]): Map<string, string> {
 export class RoutingState {
   private writes: Promise<void> = Promise.resolve();
   private readonly aliases: Map<string, string>;
-  private constructor(private data: PersistedState, private readonly persistence: StatePersistence, private readonly references: AssistantReferencePolicy, private readonly now: () => number) {
+  private constructor(private data: PersistedState, private readonly persistence: StatePersistence, private readonly references: ProviderReferences, private readonly now: () => number) {
     this.aliases = aliasMap(data.aliases);
   }
 
   /**
-   * Reads, validates and (for legacy version 1) migrates saved state entirely in memory. Nothing is written
+   * Reads, validates and (for legacy versions) migrates saved state entirely in memory. Nothing is written
    * unless every check passes, so a rejected load leaves the stored document byte-for-byte untouched.
+   * `references` lists every provider the saved state may mention; each gets a slot on every route.
    */
-  static async load(persistence: StatePersistence, references: AssistantReferencePolicy, now: () => number = Date.now): Promise<RoutingState> {
+  static async load(persistence: StatePersistence, references: ProviderReferences, now: () => number = Date.now): Promise<RoutingState> {
     const raw = await persistence.read();
-    const data: PersistedState = raw === undefined ? { version: CURRENT_VERSION, running: false, aliases: [], routes: [], deliveries: [] } : parseStored(raw);
+    const data: PersistedState = raw === undefined
+      ? { version: CURRENT_VERSION, running: false, aliases: [], routes: [], deliveries: [], settings: defaultSettings(), limits: {}, turns: {} }
+      : parseStored(raw);
+    const known = new Set(Object.keys(references));
+    const unknown = (provider: string): Error => new Error(`Saved state mentions the assistant "${provider}", which this build does not provide.`);
+    for (const provider of [...data.settings.providers, ...Object.keys(data.limits)]) if (!known.has(provider)) throw unknown(provider);
+    if (new Set(data.settings.providers).size !== data.settings.providers.length) throw new Error('Saved state lists an assistant more than once.');
     const canonical = aliasMap(data.aliases);
     const projects = new Map<string, string>();
     const conversations = new Map<string, string>();
@@ -107,19 +165,26 @@ export class RoutingState {
       if (seen.has(route.contactId)) throw new Error(`Saved state has more than one route for ${route.contactId}.`);
       seen.add(route.contactId);
       const owner = canonical.get(route.contactId) ?? route.contactId;
-      if (route.projectRef !== null) {
-        route.projectRef = references.normalizeProject(route.projectRef);
-        const previous = projects.get(route.projectRef);
-        if (previous !== undefined && previous !== owner) throw new Error(`Saved state assigns one project to more than one contact (${route.projectRef}). Fix the saved state before starting.`);
-        projects.set(route.projectRef, owner);
-      }
-      if (route.conversationRef !== null) {
-        try { route.conversationRef = references.normalizeConversation(route.conversationRef, route.projectRef); }
-        catch (error) { throw new Error(`Saved conversation for ${route.name} does not match its saved project: ${error instanceof Error ? error.message : String(error)}`); }
-        const previous = conversations.get(route.conversationRef);
-        if (previous !== undefined && previous !== owner) throw new Error(`Saved state assigns one conversation to more than one contact (${route.conversationRef}). Fix the saved state before starting.`);
-        conversations.set(route.conversationRef, owner);
-        if (route.conversationStartedAt === null) route.conversationStartedAt = baseline;
+      for (const provider of Object.keys(route.refs)) if (!known.has(provider)) throw unknown(provider);
+      for (const provider of known) {
+        const slot = route.refs[provider] ??= emptySlot();
+        const policy = references[provider]!;
+        if (slot.projectRef !== null) {
+          slot.projectRef = policy.normalizeProject(slot.projectRef);
+          const key = `${provider}\0${slot.projectRef}`;
+          const previous = projects.get(key);
+          if (previous !== undefined && previous !== owner) throw new Error(`Saved state assigns one project to more than one contact (${slot.projectRef}). Fix the saved state before starting.`);
+          projects.set(key, owner);
+        }
+        if (slot.conversationRef !== null) {
+          try { slot.conversationRef = policy.normalizeConversation(slot.conversationRef, slot.projectRef); }
+          catch (error) { throw new Error(`Saved conversation for ${route.name} does not match its saved project: ${error instanceof Error ? error.message : String(error)}`); }
+          const key = `${provider}\0${slot.conversationRef}`;
+          const previous = conversations.get(key);
+          if (previous !== undefined && previous !== owner) throw new Error(`Saved state assigns one conversation to more than one contact (${slot.conversationRef}). Fix the saved state before starting.`);
+          conversations.set(key, owner);
+          if (slot.startedAt === null) slot.startedAt = baseline;
+        }
       }
     }
     for (const delivery of data.deliveries) {
@@ -134,15 +199,58 @@ export class RoutingState {
     return state;
   }
 
-  routes(): Route[] { return this.data.routes.map(route => ({ ...route })); }
+  private copy(route: Route): Route { return { ...route, refs: structuredClone(route.refs) }; }
+  routes(): Route[] { return this.data.routes.map(route => this.copy(route)); }
   route(contactId: string): Route | undefined {
     const id = this.canonicalId(contactId);
     const route = this.data.routes.find(item => item.contactId === id);
-    return route && { ...route };
+    return route && this.copy(route);
   }
   isRunning(): boolean { return this.data.running; }
   async setRunning(running: boolean): Promise<void> { this.data.running = running; await this.save(); }
   canonicalId(id: string): string { return this.aliases.get(id) ?? id; }
+
+  /** Provider order and fallback retries. `providers[0]` is the primary. */
+  settings(): AssistantSettings { return structuredClone(this.data.settings); }
+  async setSettings(settings: AssistantSettings): Promise<void> {
+    const providers = settings.providers;
+    if (providers.length === 0 || new Set(providers).size !== providers.length) throw new Error('Choose at least one assistant, each at most once.');
+    for (const provider of providers) if (!(provider in this.references)) throw new Error(`Unknown assistant "${provider}".`);
+    if (!Number.isInteger(settings.retriesBeforeFallback) || settings.retriesBeforeFallback < 0 || settings.retriesBeforeFallback > MAX_RETRIES_BEFORE_FALLBACK) {
+      throw new Error(`Retries before fallback must be a whole number from 0 to ${MAX_RETRIES_BEFORE_FALLBACK}.`);
+    }
+    const options: AssistantSettings['options'] = {};
+    for (const [provider, values] of Object.entries(settings.options)) {
+      if (!(provider in this.references)) throw new Error(`Unknown assistant "${provider}".`);
+      const declared = new Set(providerOptionSpecs(provider).map(spec => spec.key));
+      const kept = Object.entries(values).filter(([, value]) => value.trim() !== '');
+      for (const [key] of kept) if (!declared.has(key)) throw new Error(`${providerName(provider)} has no option "${key}".`);
+      if (kept.length > 0) options[provider] = Object.fromEntries(kept.map(([key, value]) => [key, value.trim()]));
+    }
+    this.data.settings = { providers: [...providers], retriesBeforeFallback: settings.retriesBeforeFallback, options };
+    await this.save();
+  }
+  /** When `provider` is usable again, or null when it is not limited now. */
+  limitedUntil(provider: ProviderId): number | null {
+    const until = this.data.limits[provider];
+    return until !== undefined && until > this.now() ? until : null;
+  }
+  async markLimited(provider: ProviderId, until: number): Promise<void> {
+    if (!(provider in this.references)) throw new Error(`Unknown assistant "${provider}".`);
+    this.data.limits[provider] = Math.round(until);
+    for (const [other, time] of Object.entries(this.data.limits)) if (time <= this.now()) delete this.data.limits[other];
+    await this.save();
+  }
+  /** The contact's recent turns, oldest first. */
+  turns(contactId: string): Turn[] { return (this.data.turns[this.canonicalId(contactId)] ?? []).map(turn => ({ ...turn })); }
+  /** Appends one turn (text only, bounded). The log only feeds provider handoff and is dropped when the contact's conversations expire. */
+  async recordTurn(contactId: string, turn: Omit<Turn, 'at'>): Promise<void> {
+    contactId = this.canonicalId(contactId);
+    if (!this.data.routes.some(route => route.contactId === contactId)) throw new Error('Contact has no route.');
+    const text = turn.text.length > MAX_TURN_CHARS ? `${turn.text.slice(0, MAX_TURN_CHARS)}…` : turn.text;
+    this.data.turns[contactId] = [...(this.data.turns[contactId] ?? []), { ...turn, text, at: this.now() }].slice(-MAX_TURNS);
+    await this.save();
+  }
   /**
    * Delivery keys are `<contactId>:<messageId>` by convention, but ids are opaque and may contain ':'. The owning contact is therefore
    * always passed explicitly: a key that starts with that exact id gets the canonical id as its prefix; any other key is left as is.
@@ -160,7 +268,15 @@ export class RoutingState {
     return this.data.deliveries.some(delivery => delivery.status === 'working' && this.canonicalId(delivery.contactId) === contactId);
   }
   private pausedRoute(contact: Contact): Route {
-    return { contactId: contact.id, name: contact.name, enabled: false, conversationRef: null, error: null, projectRef: null, conversationTtlMinutes: DEFAULT_CONVERSATION_TTL_MINUTES, conversationStartedAt: null };
+    return {
+      contactId: contact.id, name: contact.name, enabled: false, error: null, conversationTtlMinutes: DEFAULT_CONVERSATION_TTL_MINUTES,
+      refs: Object.fromEntries(Object.keys(this.references).map(provider => [provider, emptySlot()])),
+    };
+  }
+  private policy(provider: ProviderId): AssistantReferencePolicy {
+    const policy = this.references[provider];
+    if (!policy) throw new Error(`Unknown assistant "${provider}".`);
+    return policy;
   }
 
   async linkIdentity({ alias, canonical }: IdentityAlias): Promise<void> {
@@ -169,17 +285,22 @@ export class RoutingState {
     for (const target of this.aliases.values()) if (target === alias) throw new Error(`${alias} is already a canonical identity and cannot become an alias.`);
     const source = this.data.routes.find(route => route.contactId === alias);
     const target = this.data.routes.find(route => route.contactId === canonical);
-    if (source?.conversationRef && target?.conversationRef && source.conversationRef !== target.conversationRef) {
-      throw new Error(`Two conversations are configured for the same contact (${alias}, ${canonical}). Neither conversation was discarded; inspect the saved session configuration before merging.`);
-    }
-    if (source?.projectRef && target?.projectRef && source.projectRef !== target.projectRef) {
-      throw new Error(`Two projects are configured for the same contact (${alias}, ${canonical}). Neither project was discarded; clear one before merging.`);
-    }
+    const providers = Object.keys(this.references);
     if (source && target) {
-      const conversation = target.conversationRef ?? source.conversationRef;
-      if (conversation) {
-        try { this.references.normalizeConversation(conversation, target.projectRef ?? source.projectRef); }
-        catch { throw new Error(`The saved conversation of one of the same contact's routes (${alias}, ${canonical}) does not belong to the other route's project. Neither was discarded; clear the project or conversation before merging.`); }
+      for (const provider of providers) {
+        const from = slotOf(source, provider);
+        const into = slotOf(target, provider);
+        if (from.conversationRef && into.conversationRef && from.conversationRef !== into.conversationRef) {
+          throw new Error(`Two conversations are configured for the same contact (${alias}, ${canonical}). Neither conversation was discarded; inspect the saved session configuration before merging.`);
+        }
+        if (from.projectRef && into.projectRef && from.projectRef !== into.projectRef) {
+          throw new Error(`Two projects are configured for the same contact (${alias}, ${canonical}). Neither project was discarded; clear one before merging.`);
+        }
+        const conversation = into.conversationRef ?? from.conversationRef;
+        if (conversation) {
+          try { this.policy(provider).normalizeConversation(conversation, into.projectRef ?? from.projectRef); }
+          catch { throw new Error(`The saved conversation of one of the same contact's routes (${alias}, ${canonical}) does not belong to the other route's project. Neither was discarded; clear the project or conversation before merging.`); }
+        }
       }
     }
     const existing = this.data.aliases.find(mapping => mapping.alias === alias);
@@ -188,21 +309,25 @@ export class RoutingState {
     else this.data.aliases.push({ alias, canonical });
     this.aliases.set(alias, canonical);
     if (source && target) {
-      const owner = !target.conversationRef && source.conversationRef ? source : target;
+      const owner = !hasConversation(target) && hasConversation(source) ? source : target;
       const peer = owner === source ? target : source;
       const ttl = owner.conversationTtlMinutes === DEFAULT_CONVERSATION_TTL_MINUTES ? peer.conversationTtlMinutes : owner.conversationTtlMinutes;
-      if (target.conversationRef) {
-        if (source.conversationRef) target.conversationStartedAt = [target.conversationStartedAt, source.conversationStartedAt].reduce<number | null>((earliest, value) => value === null ? earliest : earliest === null ? value : Math.min(earliest, value), null);
-      } else {
-        target.conversationRef = source.conversationRef;
-        target.conversationStartedAt = source.conversationStartedAt;
+      for (const provider of providers) {
+        const from = slotOf(source, provider);
+        const into = target.refs[provider] ??= emptySlot();
+        if (into.conversationRef) {
+          if (from.conversationRef) into.startedAt = [into.startedAt, from.startedAt].reduce<number | null>((earliest, value) => value === null ? earliest : earliest === null ? value : Math.min(earliest, value), null);
+        } else { into.conversationRef = from.conversationRef; into.startedAt = from.startedAt; }
+        into.projectRef ??= from.projectRef;
       }
-      target.projectRef ??= source.projectRef;
       target.conversationTtlMinutes = ttl;
       target.error ??= source.error;
       target.enabled = (target.enabled || source.enabled) && !target.error;
       this.data.routes = this.data.routes.filter(route => route !== source);
     } else if (source) source.contactId = canonical;
+    const merged = [...(this.data.turns[alias] ?? []), ...(this.data.turns[canonical] ?? [])];
+    delete this.data.turns[alias];
+    if (merged.length > 0) this.data.turns[canonical] = merged.sort((a, b) => a.at - b.at).slice(-MAX_TURNS);
     const deliveries = new Map<string, Delivery>();
     const priority = { working: 2, done: 1, failed: 0 };
     for (const delivery of this.data.deliveries) {
@@ -230,16 +355,22 @@ export class RoutingState {
     route.enabled = false; route.error = error;
     await this.save();
   }
-  /** Assigns or clears the assistant project. Creates a paused route for an untouched contact. A changed project drops the local conversation link. */
-  async setProject(contact: Contact, ref: string | null): Promise<void> {
+  /** Assigns or clears the project on one provider. Creates a paused route for an untouched contact. A changed project drops that provider's local conversation link. */
+  async setProject(contact: Contact, provider: ProviderId, ref: string | null): Promise<void> {
     const contactId = this.canonicalId(contact.id);
-    const project = ref === null ? null : this.references.normalizeProject(ref);
+    const project = ref === null ? null : this.policy(provider).normalizeProject(ref);
     if (this.hasWorkingDelivery(contactId)) throw new Error('A message is being delivered for this contact. Change the project after it finishes.');
-    if (project !== null && this.data.routes.some(item => this.canonicalId(item.contactId) !== contactId && item.projectRef === project)) throw new Error('Project already belongs to another contact.');
+    if (project !== null && this.data.routes.some(item => this.canonicalId(item.contactId) !== contactId && slotOf(item, provider).projectRef === project)) throw new Error('Project already belongs to another contact.');
     const route = this.data.routes.find(item => item.contactId === contactId);
-    if (!route) this.data.routes.push({ ...this.pausedRoute({ id: contactId, name: contact.name }), projectRef: project });
-    else if (route.projectRef === project) return;
-    else { route.projectRef = project; route.conversationRef = null; route.conversationStartedAt = null; }
+    if (!route) {
+      const created = this.pausedRoute({ id: contactId, name: contact.name });
+      created.refs[provider] = { ...emptySlot(), projectRef: project };
+      this.data.routes.push(created);
+    } else {
+      const slot = route.refs[provider] ??= emptySlot();
+      if (slot.projectRef === project) return;
+      route.refs[provider] = { conversationRef: null, projectRef: project, startedAt: null };
+    }
     await this.save();
   }
   /** Sets the fixed conversation lifetime in minutes, or null to never expire. The lifetime still counts from the existing conversation's birth. */
@@ -253,28 +384,38 @@ export class RoutingState {
     else route.conversationTtlMinutes = minutes;
     await this.save();
   }
-  async conversation(contactId: string, ref: string): Promise<void> {
+  async conversation(contactId: string, provider: ProviderId, ref: string): Promise<void> {
     contactId = this.canonicalId(contactId);
     const route = this.data.routes.find(item => item.contactId === contactId);
     if (!route) throw new Error('Contact has no route.');
-    const normalized = this.references.normalizeConversation(ref, route.projectRef);
-    if (this.data.routes.some(item => this.canonicalId(item.contactId) !== contactId && item.conversationRef === normalized)) throw new Error('Conversation already belongs to another contact.');
-    if (route.conversationRef === normalized && route.conversationStartedAt !== null) return;
-    route.conversationRef = normalized;
-    route.conversationStartedAt = this.now();
+    const slot = route.refs[provider] ??= emptySlot();
+    const normalized = this.policy(provider).normalizeConversation(ref, slot.projectRef);
+    if (this.data.routes.some(item => this.canonicalId(item.contactId) !== contactId && slotOf(item, provider).conversationRef === normalized)) throw new Error('Conversation already belongs to another contact.');
+    if (slot.conversationRef === normalized && slot.startedAt !== null) return;
+    slot.conversationRef = normalized;
+    slot.startedAt = this.now();
     await this.save();
   }
-  /** Drops an expired conversation link before submission and returns the current route. Fixed lifetime from the first persisted reference; never sliding. */
+  /**
+   * Drops expired conversation links before submission and returns the current route. Fixed lifetime from the first persisted reference; never sliding.
+   * Once no provider holds a conversation any more, the recent-turn log is dropped too: the contact starts fresh.
+   */
   async refreshConversation(contactId: string): Promise<Route | undefined> {
     contactId = this.canonicalId(contactId);
     const route = this.data.routes.find(item => item.contactId === contactId);
     if (!route) return undefined;
-    const { conversationRef, conversationStartedAt, conversationTtlMinutes } = route;
-    if (conversationRef !== null && conversationStartedAt !== null && conversationTtlMinutes !== null && this.now() >= conversationStartedAt + conversationTtlMinutes * 60_000) {
-      route.conversationRef = null; route.conversationStartedAt = null;
+    const ttl = route.conversationTtlMinutes;
+    let expired = false;
+    for (const slot of Object.values(route.refs)) {
+      if (slot.conversationRef !== null && slot.startedAt !== null && ttl !== null && this.now() >= slot.startedAt + ttl * 60_000) {
+        slot.conversationRef = null; slot.startedAt = null; expired = true;
+      }
+    }
+    if (expired) {
+      if (!hasConversation(route)) delete this.data.turns[contactId];
       await this.save();
     }
-    return { ...route };
+    return this.copy(route);
   }
   async claim(key: string, contactId: string): Promise<boolean> {
     if (this.findDelivery(key, contactId)) return false;

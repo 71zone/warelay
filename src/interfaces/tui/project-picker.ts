@@ -1,6 +1,7 @@
 import blessed from 'blessed';
 import type { Application } from '../../core/application.js';
 import type { Contact, Project } from '../../core/contracts.js';
+import { providerName } from '../../core/providers.js';
 import { errorMessage, fit, plain, textWidth, wrap } from './text.js';
 
 type Row =
@@ -57,7 +58,7 @@ function distinguishing(ref: string, group: string[]): string {
  * it was opened for; it never enables forwarding and drops catalog results that arrive after it was cancelled.
  */
 export function createProjectPicker(screen: blessed.Widgets.Screen, application: Application, hooks: PickerHooks, frame: blessed.Widgets.Border): ProjectPicker {
-  const box = blessed.box({ parent: screen, top: 'center', left: 'center', width: 88, height: 28, border: frame, label: ` ${plain(application.metadata.assistantName) || 'Assistant'} project `, hidden: true, tags: true, mouse: true, style: { fg: 'white', bg: 'black', border: { fg: 'cyan' } } });
+  const box = blessed.box({ parent: screen, top: 'center', left: 'center', width: 88, height: 28, border: frame, label: ' Assistant project ', hidden: true, tags: true, mouse: true, style: { fg: 'white', bg: 'black', border: { fg: 'cyan' } } });
   const header = blessed.box({ parent: box, top: 0, left: 1, width: 84, height: 3, tags: true, style: { bg: 'black' } });
   const search = blessed.box({ parent: box, top: 3, left: 1, width: 84, height: 1, tags: true, style: { bg: 'black' } });
   const status = blessed.box({ parent: box, top: 4, left: 1, width: 84, height: 1, tags: true, style: { bg: 'black' } });
@@ -70,19 +71,25 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
     widget.on('press', () => { if (state && !hooks.blocked()) action(); });
     buttons.push(widget);
   };
-  const assistant = plain(application.metadata.assistantName) || 'assistant';
+  /** The assistant whose projects are shown: the primary when the picker opens, changed with P. */
+  let provider = application.primaryProvider();
+  let assistant = plain(providerName(provider)) || 'assistant';
+  const useProvider = (next: string): void => {
+    provider = next; assistant = plain(providerName(next)) || 'assistant';
+    box.setLabel(` ${assistant} project `);
+  };
   let state: State | null = null;
   let rows: Row[] = [];
   let rendering = false;
   let innerWidth = 84;
 
-  const currentRef = (target: Contact): string | null => application.snapshot().routes.find(route => route.contactId === target.id)?.projectRef ?? null;
+  const currentRef = (target: Contact): string | null => application.projectRef(application.snapshot().routes.find(route => route.contactId === target.id), provider);
 
   function buildRows(s: State): Row[] {
     const all = application.snapshot().routes;
-    const current = all.find(route => route.contactId === s.target.id)?.projectRef ?? null;
+    const current = application.projectRef(all.find(route => route.contactId === s.target.id), provider);
     const owners = new Map<string, string>();
-    for (const route of all) if (route.projectRef && route.contactId !== s.target.id) owners.set(route.projectRef, plain(route.name) || route.contactId);
+    for (const route of all) { const ref = application.projectRef(route, provider); if (ref && route.contactId !== s.target.id) owners.set(ref, plain(route.name) || route.contactId); }
     const entries: Array<{ name: string; ref: string; missing: boolean }> = s.phase === 'ready' ? s.catalog.map(project => ({ name: plain(project.name) || 'Untitled project', ref: project.ref, missing: false })) : [];
     if (current && !entries.some(entry => entry.ref === current)) entries.unshift({ name: 'Current project', ref: current, missing: s.phase === 'ready' });
     const groups = new Map<string, string[]>();
@@ -168,8 +175,8 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
       list.setItems(items);
       list.select(index);
       hint.setContent(`{gray-fg}${blessed.escape(fit(s.mode === 'search'
-        ? 'Type to filter · ↑↓ move · Enter assign · Tab list keys · F5 refresh · Esc cancel'
-        : '↑↓/J/K move · Enter assign · / search · R refresh · C no project · Tab · Esc cancel', innerWidth))}{/}`);
+        ? 'Type to filter · ↑↓ move · Enter assign · Tab list keys · F5 refresh · F6 other assistant · Esc cancel'
+        : '↑↓/J/K move · Enter assign · / search · R refresh · P other assistant · C no project · Esc cancel', innerWidth))}{/}`);
       screen.render();
     } finally { rendering = false; }
   }
@@ -178,7 +185,7 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
     const request = ++s.request;
     s.phase = 'loading'; s.error = ''; s.notice = '';
     render();
-    application.listProjects().then(projects => {
+    application.listProjects(provider).then(projects => {
       if (state !== s || s.request !== request) return;
       s.catalog = projects; s.phase = 'ready'; render();
     }, (error: unknown) => {
@@ -191,6 +198,15 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
     if (state.phase === 'loading') { state.notice = 'Already loading the project list…'; render(); return; }
     load(state);
   }
+  /** Switches to the next configured assistant's projects; the contact's project on each is independent. */
+  function nextProvider(): void {
+    if (!state || state.busy) return;
+    const order = application.snapshot().assistant.providers;
+    if (order.length < 2) { state.notice = 'Only one assistant is configured (O sets the order).'; render(); return; }
+    useProvider(order[(order.indexOf(provider) + 1) % order.length] ?? provider);
+    state.selected = currentRef(state.target); state.query = '';
+    load(state);
+  }
   function close(): void {
     if (!state) return;
     state = null; rows = [];
@@ -201,7 +217,7 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
     const s = state;
     if (!s || s.busy) return;
     s.busy = true; s.notice = 'Saving…'; render();
-    Promise.resolve().then(() => application.setProject(s.target, ref)).then(() => { if (state === s) close(); }, (error: unknown) => {
+    Promise.resolve().then(() => application.setProject(s.target, ref, provider)).then(() => { if (state === s) close(); }, (error: unknown) => {
       const message = errorMessage(error);
       application.log(message);
       if (state === s) { s.busy = false; s.notice = message; render(); }
@@ -242,6 +258,7 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
     switch (key.full) {
       case 'escape': close(); return;
       case 'f5': case 'C-r': refresh(); return;
+      case 'f6': nextProvider(); return;
       case 'enter': assign(); return;
       case 'up': move(-1); return;
       case 'down': move(1); return;
@@ -257,6 +274,7 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
       else if (ch === 'k') move(-1);
       else if (ch === 'r' || ch === 'R') refresh();
       else if (ch === 'c' || ch === 'C') { s.selected = ''; render(); }
+      else if (ch === 'p' || ch === 'P') nextProvider();
       else if (ch === '/') { s.mode = 'search'; render(); }
       else render();
       return;
@@ -303,6 +321,7 @@ export function createProjectPicker(screen: blessed.Widgets.Screen, application:
   return {
     open(target) {
       if (state) return;
+      useProvider(application.primaryProvider());
       const current = currentRef(target);
       state = { target: { id: target.id, name: target.name }, phase: 'loading', catalog: [], error: '', query: '', mode: 'search', selected: current, notice: '', busy: false, request: 0 };
       hooks.opened();

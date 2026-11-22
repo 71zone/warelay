@@ -16,15 +16,15 @@ test('merging verified identities retains the conversation and suppresses duplic
     const store = await loadState(directory);
     await store.enable(contact);
     await store.enable(aliasContact);
-    await store.conversation(aliasPair.alias, 'https://chatgpt.com/c/retained');
+    await store.conversation(aliasPair.alias, 'chatgpt', 'https://chatgpt.com/c/retained');
     await store.claim(`${aliasPair.alias}:message-1`, aliasPair.alias);
     await store.linkIdentity(aliasPair);
     await store.finish(`${aliasPair.alias}:message-1`, aliasPair.alias, 'done');
     assert.deepEqual(store.routes().map(route => route.contactId), [aliasPair.canonical]);
-    assert.equal(store.route(aliasPair.alias)?.conversationRef, 'https://chatgpt.com/c/retained');
+    assert.equal(store.route(aliasPair.alias)?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/retained');
     assert.equal(store.route(aliasPair.canonical)?.enabled, true);
     const restored = await loadState(directory);
-    assert.equal(restored.route(aliasPair.alias)?.conversationRef, 'https://chatgpt.com/c/retained');
+    assert.equal(restored.route(aliasPair.alias)?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/retained');
     assert.equal(restored.route(aliasPair.canonical)?.enabled, true);
     assert.equal(await restored.claim(`${aliasPair.canonical}:message-1`, aliasPair.canonical), false);
     assert.equal(await restored.claim(`${aliasPair.alias}:message-1`, aliasPair.alias), false);
@@ -36,8 +36,8 @@ test('conflicting saved conversations are not silently discarded during identity
     const store = await loadState(directory);
     await store.enable(contact);
     await store.enable(aliasContact);
-    await store.conversation(aliasPair.canonical, 'https://chatgpt.com/c/phone-history');
-    await store.conversation(aliasPair.alias, 'https://chatgpt.com/c/lid-history');
+    await store.conversation(aliasPair.canonical, 'chatgpt', 'https://chatgpt.com/c/phone-history');
+    await store.conversation(aliasPair.alias, 'chatgpt', 'https://chatgpt.com/c/lid-history');
     const before = store.routes();
     await assert.rejects(store.linkIdentity(aliasPair));
     assert.deepEqual(store.routes(), before);
@@ -51,21 +51,21 @@ test('a conversation lives for a fixed lifetime from its first saved reference a
     let clock = 1_000_000;
     const store = await loadState(directory, () => clock);
     await store.setConversationTtl(contact, 10);
-    await store.conversation(contact.id, 'https://chatgpt.com/c/first');
+    await store.conversation(contact.id, 'chatgpt', 'https://chatgpt.com/c/first');
     clock += 9 * minute;
-    await store.conversation(contact.id, 'https://chatgpt.com/c/first');
-    assert.equal(store.route(contact.id)?.conversationStartedAt, 1_000_000);
+    await store.conversation(contact.id, 'chatgpt', 'https://chatgpt.com/c/first');
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.startedAt, 1_000_000);
     clock = 1_000_000 + 10 * minute - 1;
-    assert.equal((await store.refreshConversation(contact.id))?.conversationRef, 'https://chatgpt.com/c/first');
+    assert.equal((await store.refreshConversation(contact.id))?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/first');
     clock = 1_000_000 + 10 * minute;
     const expired = await store.refreshConversation(contact.id);
-    assert.equal(expired?.conversationRef, null);
-    assert.equal(expired?.conversationStartedAt, null);
+    assert.equal(expired?.refs.chatgpt?.conversationRef, null);
+    assert.equal(expired?.refs.chatgpt?.startedAt, null);
     const restored = await loadState(directory, () => clock);
-    assert.equal(restored.route(contact.id)?.conversationRef, null);
-    assert.equal(restored.route(contact.id)?.conversationStartedAt, null);
-    await restored.conversation(contact.id, 'https://chatgpt.com/c/second');
-    assert.equal(restored.route(contact.id)?.conversationStartedAt, clock);
+    assert.equal(restored.route(contact.id)?.refs.chatgpt?.conversationRef, null);
+    assert.equal(restored.route(contact.id)?.refs.chatgpt?.startedAt, null);
+    await restored.conversation(contact.id, 'chatgpt', 'https://chatgpt.com/c/second');
+    assert.equal(restored.route(contact.id)?.refs.chatgpt?.startedAt, clock);
   });
 });
 
@@ -74,13 +74,13 @@ test('a conversation with no lifetime never expires and a lifetime change keeps 
     let clock = 5_000;
     const store = await loadState(directory, () => clock);
     await store.enable(contact);
-    await store.conversation(contact.id, 'https://chatgpt.com/c/old');
+    await store.conversation(contact.id, 'chatgpt', 'https://chatgpt.com/c/old');
     await store.setConversationTtl(contact, null);
     clock += 10_000 * minute;
-    assert.equal((await store.refreshConversation(contact.id))?.conversationRef, 'https://chatgpt.com/c/old');
+    assert.equal((await store.refreshConversation(contact.id))?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/old');
     await store.setConversationTtl(contact, 1);
-    assert.equal(store.route(contact.id)?.conversationStartedAt, 5_000);
-    assert.equal((await store.refreshConversation(contact.id))?.conversationRef, null);
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.startedAt, 5_000);
+    assert.equal((await store.refreshConversation(contact.id))?.refs.chatgpt?.conversationRef, null);
     await assert.rejects(store.setConversationTtl(contact, 0));
     await assert.rejects(store.setConversationTtl(contact, 1.5));
     await assert.rejects(store.setConversationTtl(contact, Number.NaN));
@@ -91,11 +91,11 @@ test('conversation birth is saved once and survives restart', async () => {
   await withDirectory(async directory => {
     const store = await loadState(directory, () => 111);
     await store.enable(contact);
-    await store.conversation(contact.id, 'https://chatgpt.com/c/born');
+    await store.conversation(contact.id, 'chatgpt', 'https://chatgpt.com/c/born');
     const restored = await loadState(directory, () => 999_999);
-    await restored.conversation(contact.id, 'https://chatgpt.com/c/born');
-    assert.equal(restored.route(contact.id)?.conversationStartedAt, 111);
-    assert.equal((await loadState(directory, () => 888_888)).route(contact.id)?.conversationStartedAt, 111);
+    await restored.conversation(contact.id, 'chatgpt', 'https://chatgpt.com/c/born');
+    assert.equal(restored.route(contact.id)?.refs.chatgpt?.startedAt, 111);
+    assert.equal((await loadState(directory, () => 888_888)).route(contact.id)?.refs.chatgpt?.startedAt, 111);
   });
 });
 
@@ -108,21 +108,36 @@ test('legacy version 1 conversations migrate to version 2 with one baseline birt
     const original = JSON.stringify(legacy);
     await writeFile(join(directory, 'state.json'), original);
     const migrated = await loadState(directory, () => 70_000);
-    assert.deepEqual(migrated.route(contact.id), { contactId: contact.id, name: 'Contact', enabled: true, conversationRef: 'https://chatgpt.com/c/legacy', projectRef: null, conversationTtlMinutes: 1440, conversationStartedAt: 70_000, error: null });
-    assert.deepEqual(migrated.route(other.id), { contactId: other.id, name: 'Other', enabled: false, conversationRef: null, projectRef: null, conversationTtlMinutes: 1440, conversationStartedAt: null, error: null });
+    assert.deepEqual(migrated.route(contact.id), { contactId: contact.id, name: 'Contact', enabled: true, conversationTtlMinutes: 1440, error: null, refs: { chatgpt: { conversationRef: 'https://chatgpt.com/c/legacy', projectRef: null, startedAt: 70_000 } } });
+    assert.deepEqual(migrated.route(other.id), { contactId: other.id, name: 'Other', enabled: false, conversationTtlMinutes: 1440, error: null, refs: { chatgpt: { conversationRef: null, projectRef: null, startedAt: null } } });
     assert.equal(await migrated.claim(`${contact.id}:old`, contact.id), false);
     assert.equal(await migrated.claim(`${aliasPair.alias}:older`, aliasPair.alias), false);
     const written = JSON.parse(await readFile(join(directory, 'state.json'), 'utf8')) as PersistedState;
-    assert.equal(written.version, 2);
+    assert.equal(written.version, 3);
     assert.equal(written.running, true);
     assert.deepEqual(written.aliases, [aliasPair]);
     assert.deepEqual(written.deliveries.slice(0, 2), [{ key: `${contact.id}:old`, contactId: contact.id, status: 'done' }, { key: `${aliasPair.alias}:older`, contactId: aliasPair.alias, status: 'failed' }]);
     assert.equal(await readFile(join(directory, 'state.json.v1.bak'), 'utf8'), original);
     assert.equal(((await stat(join(directory, 'state.json.v1.bak'))).mode & 0o777), 0o600);
     const again = await loadState(directory, () => 90_000_000);
-    assert.equal(again.route(contact.id)?.conversationStartedAt, 70_000);
+    assert.equal(again.route(contact.id)?.refs.chatgpt?.startedAt, 70_000);
     assert.equal(await readFile(join(directory, 'state.json.v1.bak'), 'utf8'), original);
   });
+});
+
+test('saved version 2 routes migrate to version 3: the old conversation and project become the chatgpt slot, other providers start empty, settings are the defaults', async () => {
+  const persistence = memoryPersistence({ version: 2, running: true, aliases: [], routes: [
+    { contactId: contact.id, name: 'Contact', enabled: true, error: null, projectRef: projectA, conversationRef: `${projectA}/c/chat-1`, conversationTtlMinutes: 60, conversationStartedAt: 42 },
+  ], deliveries: [] });
+  const store = await RoutingState.load(persistence, { chatgpt: chatgptReferences, claude: opaqueReferences }, () => 1);
+  assert.deepEqual(store.route(contact.id), { contactId: contact.id, name: 'Contact', enabled: true, error: null, conversationTtlMinutes: 60, refs: {
+    chatgpt: { conversationRef: `${projectA}/c/chat-1`, projectRef: projectA, startedAt: 42 },
+    claude: { conversationRef: null, projectRef: null, startedAt: null },
+  } });
+  assert.deepEqual(store.settings(), { providers: ['chatgpt'], retriesBeforeFallback: 2, options: {} });
+  assert.equal(store.limitedUntil('chatgpt'), null);
+  await store.claim('k', contact.id);
+  assert.equal(persistence.writes.at(-1)?.version, 3);
 });
 
 test('legacy version 1 projects, lifetimes and interrupted deliveries migrate with their values intact', async () => {
@@ -130,16 +145,16 @@ test('legacy version 1 projects, lifetimes and interrupted deliveries migrate wi
     { jid: contact.id, name: 'Contact', enabled: true, conversationUrl: `${projectA}-notes/c/chat-1?x=1`, error: null, projectUrl: `${projectA}-notes/project`, conversationTtlMinutes: null, conversationStartedAt: 42 },
     { jid: other.id, name: 'Other', enabled: true, conversationUrl: null, error: null, projectUrl: projectB, conversationTtlMinutes: 30, conversationStartedAt: null },
   ], deliveries: [{ key: `${other.id}:busy`, jid: other.id, status: 'working' }] });
-  const store = await RoutingState.load(persistence, chatgptReferences, () => 1);
-  assert.deepEqual(store.route(contact.id), { contactId: contact.id, name: 'Contact', enabled: true, conversationRef: `${projectA}/c/chat-1`, projectRef: projectA, conversationTtlMinutes: null, conversationStartedAt: 42, error: null });
+  const store = await RoutingState.load(persistence, { chatgpt: chatgptReferences }, () => 1);
+  assert.deepEqual(store.route(contact.id), { contactId: contact.id, name: 'Contact', enabled: true, conversationTtlMinutes: null, error: null, refs: { chatgpt: { conversationRef: `${projectA}/c/chat-1`, projectRef: projectA, startedAt: 42 } } });
   const quarantined = store.route(other.id);
   assert.equal(quarantined?.enabled, false);
   assert.match(quarantined?.error ?? '', /Interrupted delivery/);
-  assert.equal(quarantined?.projectRef, projectB);
+  assert.equal(quarantined?.refs.chatgpt?.projectRef, projectB);
   assert.equal(quarantined?.conversationTtlMinutes, 30);
   assert.equal(await store.claim(`${other.id}:busy`, other.id), false);
   assert.equal(persistence.writes.length, 1);
-  assert.equal(persistence.writes[0]?.version, 2);
+  assert.equal(persistence.writes[0]?.version, 3);
   assert.equal(persistence.writes[0]?.deliveries[0]?.status, 'failed');
 });
 
@@ -156,7 +171,7 @@ test('a rejected migration leaves the stored document untouched and writes nothi
   ];
   for (const document of bad) {
     const persistence = memoryPersistence(document);
-    await assert.rejects(RoutingState.load(persistence, chatgptReferences), Error, JSON.stringify(document));
+    await assert.rejects(RoutingState.load(persistence, { chatgpt: chatgptReferences }), Error, JSON.stringify(document));
     assert.deepEqual(persistence.writes, []);
     assert.deepEqual(persistence.stored(), document);
   }
@@ -175,26 +190,26 @@ test('a rejected migration leaves the stored document untouched and writes nothi
 test('changing a project drops the local conversation, an unchanged project does not, and projects are unique per contact', async () => {
   await withDirectory(async directory => {
     const store = await loadState(directory, () => 1);
-    await store.setProject(contact, projectA);
-    await store.conversation(contact.id, `${projectA}/c/chat-1`);
-    await store.setProject(contact, `https://chatgpt.com/g/g-p-${'a'.repeat(32)}-slug/project`);
-    assert.equal(store.route(contact.id)?.conversationRef, `${projectA}/c/chat-1`);
-    assert.equal(store.route(contact.id)?.conversationStartedAt, 1);
-    await assert.rejects(store.setProject(other, projectA), /another contact/);
+    await store.setProject(contact, 'chatgpt', projectA);
+    await store.conversation(contact.id, 'chatgpt', `${projectA}/c/chat-1`);
+    await store.setProject(contact, 'chatgpt', `https://chatgpt.com/g/g-p-${'a'.repeat(32)}-slug/project`);
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.conversationRef, `${projectA}/c/chat-1`);
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.startedAt, 1);
+    await assert.rejects(store.setProject(other, 'chatgpt', projectA), /another contact/);
     assert.equal(store.route(other.id), undefined);
-    await store.setProject(contact, projectB);
-    assert.equal(store.route(contact.id)?.projectRef, projectB);
-    assert.equal(store.route(contact.id)?.conversationRef, null);
-    assert.equal(store.route(contact.id)?.conversationStartedAt, null);
-    await store.setProject(other, projectA);
-    await assert.rejects(store.conversation(contact.id, `${projectA}/c/chat-1`));
-    await store.conversation(contact.id, `${projectB}/c/chat-2`);
-    await store.setProject(contact, null);
-    assert.equal(store.route(contact.id)?.projectRef, null);
-    assert.equal(store.route(contact.id)?.conversationRef, null);
-    await assert.rejects(store.setProject(contact, 'https://example.com/g/g-p-' + 'a'.repeat(32)));
+    await store.setProject(contact, 'chatgpt', projectB);
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.projectRef, projectB);
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.conversationRef, null);
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.startedAt, null);
+    await store.setProject(other, 'chatgpt', projectA);
+    await assert.rejects(store.conversation(contact.id, 'chatgpt', `${projectA}/c/chat-1`));
+    await store.conversation(contact.id, 'chatgpt', `${projectB}/c/chat-2`);
+    await store.setProject(contact, 'chatgpt', null);
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.projectRef, null);
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.conversationRef, null);
+    await assert.rejects(store.setProject(contact, 'chatgpt', 'https://example.com/g/g-p-' + 'a'.repeat(32)));
     const restored = await loadState(directory, () => 1);
-    assert.equal(restored.route(other.id)?.projectRef, projectA);
+    assert.equal(restored.route(other.id)?.refs.chatgpt?.projectRef, projectA);
   });
 });
 
@@ -203,15 +218,15 @@ test('project and lifetime changes are rejected while a delivery is working and 
     const store = await loadState(directory);
     await store.enable(contact);
     await store.claim(`${contact.id}:busy`, contact.id);
-    await assert.rejects(store.setProject(contact, projectA), /delivered/);
+    await assert.rejects(store.setProject(contact, 'chatgpt', projectA), /delivered/);
     await assert.rejects(store.setConversationTtl(contact, 5), /delivered/);
-    assert.equal(store.route(contact.id)?.projectRef, null);
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.projectRef, null);
     assert.equal(store.route(contact.id)?.conversationTtlMinutes, 1440);
-    await store.setProject(other, projectB);
+    await store.setProject(other, 'chatgpt', projectB);
     await store.finish(`${contact.id}:busy`, contact.id, 'done');
-    await store.setProject(contact, projectA);
+    await store.setProject(contact, 'chatgpt', projectA);
     await store.setConversationTtl(contact, 5);
-    assert.equal(store.route(contact.id)?.projectRef, projectA);
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.projectRef, projectA);
     assert.equal(store.route(contact.id)?.conversationTtlMinutes, 5);
   });
 });
@@ -219,13 +234,13 @@ test('project and lifetime changes are rejected while a delivery is working and 
 test('configuring an untouched contact creates a paused route and never enables forwarding', async () => {
   await withDirectory(async directory => {
     const store = await loadState(directory);
-    await store.setProject(contact, projectA);
+    await store.setProject(contact, 'chatgpt', projectA);
     await store.setConversationTtl(other, 30);
     for (const [id, project, ttl] of [[contact.id, projectA, 1440], [other.id, null, 30]] as const) {
       const route = store.route(id);
       assert.equal(route?.enabled, false);
       assert.equal(route?.error, null);
-      assert.equal(route?.projectRef, project);
+      assert.equal(route?.refs.chatgpt?.projectRef, project);
       assert.equal(route?.conversationTtlMinutes, ttl);
     }
     assert.equal(store.isRunning(), false);
@@ -237,19 +252,19 @@ test('merging aliases keeps the project, lifetime and earliest conversation birt
   await withDirectory(async directory => {
     let clock = 100;
     const store = await loadState(directory, () => clock);
-    await store.setProject(aliasContact, projectA);
+    await store.setProject(aliasContact, 'chatgpt', projectA);
     await store.setConversationTtl(aliasContact, 60);
-    await store.conversation(aliasPair.alias, `${projectA}/c/shared`);
+    await store.conversation(aliasPair.alias, 'chatgpt', `${projectA}/c/shared`);
     clock = 200;
     await store.enable(contact);
     await store.linkIdentity(aliasPair);
     const merged = store.route(aliasPair.alias);
     assert.equal(merged?.contactId, aliasPair.canonical);
-    assert.equal(merged?.projectRef, projectA);
+    assert.equal(merged?.refs.chatgpt?.projectRef, projectA);
     assert.equal(merged?.conversationTtlMinutes, 60);
-    assert.equal(merged?.conversationRef, `${projectA}/c/shared`);
-    assert.equal(merged?.conversationStartedAt, 100);
-    await assert.rejects(store.setProject(other, projectA), /another contact/);
+    assert.equal(merged?.refs.chatgpt?.conversationRef, `${projectA}/c/shared`);
+    assert.equal(merged?.refs.chatgpt?.startedAt, 100);
+    await assert.rejects(store.setProject(other, 'chatgpt', projectA), /another contact/);
     const restored = await loadState(directory, () => 300);
     assert.deepEqual(restored.route(aliasPair.canonical), merged);
   });
@@ -260,12 +275,12 @@ test('conflicting alias projects or a conversation outside the merged project ar
     await withDirectory(async directory => {
       const store = await loadState(directory, () => 1);
       if (scenario === 'projects') {
-        await store.setProject(contact, projectA);
-        await store.setProject(aliasContact, projectB);
+        await store.setProject(contact, 'chatgpt', projectA);
+        await store.setProject(aliasContact, 'chatgpt', projectB);
       } else {
-        await store.setProject(contact, projectA);
+        await store.setProject(contact, 'chatgpt', projectA);
         await store.enable(aliasContact);
-        await store.conversation(aliasPair.alias, 'https://chatgpt.com/c/standalone');
+        await store.conversation(aliasPair.alias, 'chatgpt', 'https://chatgpt.com/c/standalone');
       }
       await store.claim(`${aliasPair.alias}:m`, aliasPair.alias);
       const before = store.routes();
@@ -325,7 +340,8 @@ test('persisted alias routes with the same project and conversation load, then m
     const store = await loadState(directory, () => 1000);
     assert.equal(store.routes().length, 2);
     await store.linkIdentity(aliasPair);
-    assert.deepEqual(store.routes(), [{ ...canonicalRoute, conversationTtlMinutes: 30, conversationStartedAt: 50 }]);
+    const migrated = { contactId: canonicalRoute.contactId, name: 'Contact', enabled: false, error: null, conversationTtlMinutes: 30, refs: { chatgpt: { conversationRef: shared.conversationRef, projectRef: shared.projectRef, startedAt: 50 } } };
+    assert.deepEqual(store.routes(), [migrated]);
     assert.deepEqual((await loadState(directory, () => 2000)).routes(), store.routes());
 
     const unshared = { ...canonicalRoute, contactId: other.id, name: 'Other' };
@@ -343,31 +359,31 @@ test('persisted alias routes with the same project and conversation load, then m
 test('opaque non-URL provider references are validated by the injected policy and round-trip unchanged', async () => {
   await withDirectory(async directory => {
     const store = await loadState(directory, () => 5, opaqueReferences);
-    await store.setProject(contact, 'ws:Alpha');
-    assert.equal(store.route(contact.id)?.projectRef, 'ws:alpha');
-    await store.conversation(contact.id, 'ws:alpha/thread:t1');
-    assert.equal(store.route(contact.id)?.conversationRef, 'ws:alpha/thread:t1');
-    await assert.rejects(store.conversation(contact.id, 'thread:t2'), /workspace/);
-    await assert.rejects(store.setProject(contact, projectA), /ws:<name>/);
-    await assert.rejects(store.setProject(other, 'ws:ALPHA'), /another contact/);
-    await store.setProject(other, 'ws:beta');
-    await assert.rejects(store.conversation(other.id, 'ws:alpha/thread:t1'));
-    await store.setProject(contact, 'ws:gamma');
-    assert.equal(store.route(contact.id)?.conversationRef, null);
-    await store.setProject(contact, null);
-    await store.conversation(contact.id, 'thread:t9');
+    await store.setProject(contact, 'chatgpt', 'ws:Alpha');
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.projectRef, 'ws:alpha');
+    await store.conversation(contact.id, 'chatgpt', 'ws:alpha/thread:t1');
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.conversationRef, 'ws:alpha/thread:t1');
+    await assert.rejects(store.conversation(contact.id, 'chatgpt', 'thread:t2'), /workspace/);
+    await assert.rejects(store.setProject(contact, 'chatgpt', projectA), /ws:<name>/);
+    await assert.rejects(store.setProject(other, 'chatgpt', 'ws:ALPHA'), /another contact/);
+    await store.setProject(other, 'chatgpt', 'ws:beta');
+    await assert.rejects(store.conversation(other.id, 'chatgpt', 'ws:alpha/thread:t1'));
+    await store.setProject(contact, 'chatgpt', 'ws:gamma');
+    assert.equal(store.route(contact.id)?.refs.chatgpt?.conversationRef, null);
+    await store.setProject(contact, 'chatgpt', null);
+    await store.conversation(contact.id, 'chatgpt', 'thread:t9');
     const restored = await loadState(directory, () => 6, opaqueReferences);
-    assert.deepEqual(restored.route(contact.id), { contactId: contact.id, name: 'Contact', enabled: false, conversationRef: 'thread:t9', projectRef: null, conversationTtlMinutes: 1440, conversationStartedAt: 5, error: null });
-    assert.equal(restored.route(other.id)?.projectRef, 'ws:beta');
+    assert.deepEqual(restored.route(contact.id), { contactId: contact.id, name: 'Contact', enabled: false, conversationTtlMinutes: 1440, error: null, refs: { chatgpt: { conversationRef: 'thread:t9', projectRef: null, startedAt: 5 } } });
+    assert.equal(restored.route(other.id)?.refs.chatgpt?.projectRef, 'ws:beta');
     await assert.rejects(loadState(directory, () => 7, chatgptReferences), /Saved conversation|Project URL|ChatGPT/);
-    assert.equal((await loadState(directory, () => 8, opaqueReferences)).route(contact.id)?.conversationRef, 'thread:t9');
+    assert.equal((await loadState(directory, () => 8, opaqueReferences)).route(contact.id)?.refs.chatgpt?.conversationRef, 'thread:t9');
   });
 });
 
 test('legacy version 1 data can be migrated through a non-URL policy only when its references satisfy that policy', async () => {
   const legacy = { version: 1, running: false, aliases: [], routes: [{ jid: contact.id, name: 'Contact', enabled: false, conversationUrl: 'https://chatgpt.com/c/x', error: null }], deliveries: [] };
   const persistence = memoryPersistence(legacy);
-  await assert.rejects(RoutingState.load(persistence, opaqueReferences), /Thread reference/);
+  await assert.rejects(RoutingState.load(persistence, { chatgpt: opaqueReferences }), /Thread reference/);
   assert.deepEqual(persistence.writes, []);
   assert.deepEqual(persistence.stored(), legacy);
 });
@@ -384,7 +400,7 @@ test('state writes keep call order even when an earlier write is slow', async ()
       order.push(state.deliveries.length);
     },
   };
-  const store = await RoutingState.load(persistence, chatgptReferences);
+  const store = await RoutingState.load(persistence, { chatgpt: chatgptReferences });
   const first = store.claim('one', contact.id);
   const second = store.claim('two', contact.id);
   const third = store.claim('three', contact.id);
@@ -397,7 +413,7 @@ test('JSON state persistence is private, atomic, serialized and reports absence 
   await withDirectory(async directory => {
     const persistence = createJsonStatePersistence(join(directory, 'nested', 'data'));
     assert.equal(await persistence.read(), undefined);
-    const base: PersistedState = { version: 2, running: false, aliases: [], routes: [], deliveries: [] };
+    const base: PersistedState = { version: 3, running: false, aliases: [], routes: [], deliveries: [], settings: { providers: ['chatgpt'], retriesBeforeFallback: 2, options: {} }, limits: {}, turns: {} };
     const writes = Array.from({ length: 20 }, (_, index) => persistence.write({ ...base, deliveries: [{ key: String(index), contactId: 'x', status: 'done' }] }));
     await Promise.all(writes);
     const data = join(directory, 'nested', 'data');

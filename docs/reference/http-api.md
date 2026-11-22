@@ -66,14 +66,14 @@ All bodies and responses are JSON. Errors are `{ "error": "<code>", "message": "
 | `POST /api/logout` | session + CSRF | `{}` | `{ ok:true }`, clears the cookie, ends its streams |
 | `GET /api/state` | session | | `State` plus `activity` |
 | `GET /api/events` | session | | server-sent events (below) |
-| `GET /api/projects` | session | | `{ projects:[{ name, ref, owner:{ id, name }\|null }] }`; `502` if the assistant cannot list them |
+| `GET /api/projects` | session | | `{ projects:[{ name, ref, owner:{ id, name }\|null }] }` of the primary assistant (first in `State.assistant.providers`); `502` if the assistant cannot list them |
 | `POST /api/channel/connect` | session + CSRF | `{}` | calls `application.login()` (saved login or pairing QR) |
 | `POST /api/browser/check` | session + CSRF | `{}` | `application.checkBrowser()`; `502` on failure |
 | `POST /api/forwarding/resume` | session + CSRF | `{}` | `application.resume()`; `409` e.g. when nothing is enabled |
 | `POST /api/forwarding/pause` | session + CSRF | `{}` | `application.pause()` |
 | `POST /api/contacts` | session + CSRF | `{ input }` | resolves a phone number or JID through the channel, enables it and resumes; `422` for unusable input |
 | `POST /api/contacts/enabled` | session + CSRF | `{ contactId, enabled }` | idempotent desired state (`setContactEnabled`); enabling resumes forwarding; `404` unknown contact |
-| `POST /api/contacts/project` | session + CSRF | `{ contactId, projectRef: string\|null }` | assigns or clears the project; never enables the contact; `409` if taken or invalid |
+| `POST /api/contacts/project` | session + CSRF | `{ contactId, projectRef: string\|null }` | assigns or clears the project on the assistant the reference points at (the primary for `null`); never enables the contact; `409` if taken or invalid |
 | `POST /api/contacts/ttl` | session + CSRF | `{ contactId, ttl }` | `ttl` uses the terminal grammar (`90m`, `12h`, `3d`, `never`, empty = `24h`); `400` if invalid |
 
 `contactId` must be an id from the current directory (`State.contacts`); names are never accepted from the client. Project and lifetime semantics are the same as in the terminal; see [Conversations](../concepts/conversations.md).
@@ -82,7 +82,8 @@ All bodies and responses are JSON. Errors are `{ "error": "<code>", "message": "
 
 ```ts
 {
-  app: { channelName, assistantName },
+  app: { channelName, assistantName },   // assistantName: the configured assistants, e.g. "ChatGPT / Claude"
+  assistant: { providers: [{ id, name, limitedUntil: number | null }], retriesBeforeFallback: number },   // priority order, first = primary
   armed: boolean,                  // forwarding active
   channelStatus: string, assistantStatus: string,
   enabledCount: number, now: number,

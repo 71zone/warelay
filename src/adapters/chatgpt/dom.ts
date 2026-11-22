@@ -1,3 +1,5 @@
+import { usageLimitSource } from '../../core/usage-limit.js';
+
 /** Accessible name of ChatGPT's message composer textbox, on the home page and on a project's new-chat landing. */
 export const composerName = /Ask|Message|ChatGPT|New chat in/i;
 
@@ -28,16 +30,41 @@ export const locateAssistant = String.raw`
  * Page script (BrowserOS evaluateInPage) that reads the newest turn, or the turn of `targetUserId`, from ChatGPT's conversation DOM. It runs every second
  * while a reply is generating, so it stays light. `media` is true when the turn carries a generated image or a downloadable file: such a reply can be
  * complete without any prose, and without the "Copy" button that marks a completed text reply (an image has "Copy image" instead).
+ *
+ * `limit` is the text of a usage-limit notice (see usageLimitSource), read from three places: alerts, toasts and status regions; the composer's own area (its
+ * form without the editor, buttons and attachment tiles, so a typed draft never counts); and, only while waiting for the turn of `targetUserId`, a SHORT
+ * assistant turn, because ChatGPT can state the limit as its answer. A long reply that merely discusses limits never counts, and neither does an older turn
+ * before anything was submitted (a limit that has since lifted still sits in the history). A limit notice is not an `error`, and a turn that is itself the
+ * notice is not a completed reply.
  */
 export const chatgptInspectionScript = String.raw`(targetUserId) => {
   ${locateAssistant}
   const body = holder?.querySelector('[data-markdown-text-style="assistant-message"]');
-  const text = body?.innerText || '';
+  const replyText = body?.innerText || '';
   const media = !!turn?.querySelector('[data-testid="generated-image-gallery"] img, button[aria-label="Download file"]');
   const busy = !!main.querySelector('button[aria-label="Stop generating"],button[aria-label="Stop streaming"],button[aria-label="Stop"]');
-  const complete = turn?.getAttribute('data-talvt-turn-state') === 'complete' && (!!turn.querySelector('button[aria-label="Copy"]') || media);
-  const error = main.querySelector('[role="alert"]')?.textContent?.trim() || null;
-  return {url:location.href,userId,assistantId,text,complete,busy,error,media};
+  const completeTurn = turn?.getAttribute('data-talvt-turn-state') === 'complete' && (!!turn.querySelector('button[aria-label="Copy"]') || media);
+  const limitPattern = new RegExp(${JSON.stringify(usageLimitSource)}, 'i');
+  const noticeOf = (text) => {
+    const clean = (text || '').replace(/\s+/g, ' ').trim();
+    return clean && clean.length <= 400 && limitPattern.test(clean) ? clean : null;
+  };
+  let limit = null;
+  for (const node of document.querySelectorAll('[role="alert"],[role="status"],[data-testid*="toast"],[data-testid*="limit"]')) {
+    limit = noticeOf(node.textContent);
+    if (limit) break;
+  }
+  const form = main.querySelector('form') || document.querySelector('form[data-type="unified-composer"]');
+  if (!limit && form) {
+    const copy = form.cloneNode(true);
+    for (const node of Array.from(copy.querySelectorAll('[contenteditable],textarea,input,button,[data-composer-attachments]'))) node.remove();
+    limit = noticeOf(copy.textContent);
+  }
+  const replyIsNotice = !!targetUserId && replyText.length <= 300 && !!noticeOf(replyText);
+  if (!limit && replyIsNotice) limit = noticeOf(replyText);
+  const alert = main.querySelector('[role="alert"]')?.textContent?.trim() || null;
+  const error = alert && !noticeOf(alert) ? alert : null;
+  return {url:location.href,userId,assistantId,text:replyIsNotice ? '' : replyText,complete:completeTurn && !replyIsNotice,busy,error,limit,media};
 }`;
 
 /**
@@ -88,8 +115,8 @@ export const composerAttachmentsScript = String.raw`() => {
 /** Project pages render a shell first; the composer only exists once the project has hydrated. Returns a BrowserOS script fragment waiting for it, or nothing for other pages. */
 export const settleScript = (page: string, url: string): string => /^https:\/\/chatgpt\.com\/g\/g-p-/.test(url) ? `try{await ${page}.waitForSelector('[contenteditable="true"][role="textbox"]',{timeout:15000});}catch{}` : '';
 
-/** BrowserOS script: true when the page behind `pageId` currently offers the composer. */
-export const composerReadyScript = (pageId: number): string => `const snapshot=await browser.page(${pageId}).snapshot({mode:'interactive'}); return snapshot.refs.some(ref=>ref.role==='textbox' && ${composerName}.test(ref.name));`;
+/** BrowserOS script expression over the interactive `snapshot`: true when the page offers the composer. */
+export const composerReady = `snapshot.refs.some(ref=>ref.role==='textbox'&&${composerName}.test(ref.name))`;
 
 /** BrowserOS script prelude defining `inside(url)`: true while `url` is a ChatGPT page whose pathname matches `pathPattern` (a pathname regex source from destinationPathPattern). */
 const insideGuard = (pathPattern: string): string => `const inside=(url)=>{const here=/^https:\\/\\/chatgpt\\.com(\\/[^?#]*)?(?:[?#].*)?$/.exec(url);return !!here&&new RegExp(${JSON.stringify(pathPattern)}).test(here[1]??'/');};`;
