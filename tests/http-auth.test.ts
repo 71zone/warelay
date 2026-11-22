@@ -18,7 +18,7 @@ test('the owner token is random, private, created once and shared by concurrent 
     assert.equal((await readFile(path, 'utf8')).trim(), token);
     const other = await readOrCreateOwnerToken(join(directory, 'other-token'));
     assert.notEqual(other, token);
-  }, 'wabgpt-token-');
+  }, 'warelay-token-');
 });
 
 test('an existing token file is tightened to owner-only and never replaced when invalid', async () => {
@@ -34,7 +34,7 @@ test('an existing token file is tightened to owner-only and never replaced when 
     assert.equal(await readFile(bad, 'utf8'), 'too short');
     await mkdir(join(directory, 'dir-token'));
     await assert.rejects(readOrCreateOwnerToken(join(directory, 'dir-token')));
-  }, 'wabgpt-token-');
+  }, 'warelay-token-');
 });
 
 test('token and CSRF comparison accept only the exact secret', () => {

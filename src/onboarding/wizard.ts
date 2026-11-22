@@ -40,9 +40,9 @@ function routeOf(snapshot: ApplicationSnapshot, contact: Contact): Route | undef
 async function confirmChatGPT({ application, io, signal, viewerUrl }: Context): Promise<void> {
   io.write('\nStep 1 of 3 · ChatGPT\n');
   io.write('In the BrowserOS window, sign in to ChatGPT yourself and finish any verification it asks for.\n');
-  io.write('wabgpt never signs in for you, never solves challenges, and does not send any prompt during setup.\n');
+  io.write('warelay never signs in for you, never solves challenges, and does not send any prompt during setup.\n');
   if (viewerUrl) io.write(`Your managed browser is at ${viewerUrl}\n`);
-  await ask(io, 'Press Enter when you are signed in and wabgpt should check: ');
+  await ask(io, 'Press Enter when you are signed in and warelay should check: ');
   for (;;) {
     try {
       const projects = await abortable(application.listProjects(undefined, signal), signal);
@@ -175,7 +175,7 @@ async function chooseProject(context: Context, contact: Contact): Promise<Projec
   const { application, io, signal } = context;
   io.write(`\nChatGPT project for ${label(contact)}\n`);
   io.write('Give each person their own ChatGPT project, and set that project\'s memory to "Project-only" in ChatGPT, so one person\'s chats never mix with your other ones.\n');
-  io.write(`wabgpt cannot check or change that setting; you do it in ChatGPT. More: ${projectsHelp}\n`);
+  io.write(`warelay cannot check or change that setting; you do it in ChatGPT. More: ${projectsHelp}\n`);
   let catalog: Project[] | null = null;
   for (;;) {
     const routes = application.snapshot().routes;

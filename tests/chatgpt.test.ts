@@ -22,7 +22,7 @@ const projectB = 'g-p-00000000000000000000000000000002';
 const urlA = `https://chatgpt.com/g/${projectA}`;
 const urlB = `https://chatgpt.com/g/${projectB}`;
 
-const mediaDirectory = join(tmpdir(), `wabgpt-chatgpt-media-${process.pid}`);
+const mediaDirectory = join(tmpdir(), `warelay-chatgpt-media-${process.pid}`);
 const media = createMediaStore(mediaDirectory);
 after(async () => { await rm(mediaDirectory, { recursive: true, force: true }); });
 
@@ -770,7 +770,7 @@ test('Application.close cancels an in-flight catalog blocked on the MCP server, 
       assert.deepEqual(fixture.tabs(), []);
       await until(() => fixture.state.blockedClosed === 1, 'the blocked HTTP exchange to be aborted');
     });
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('cancelling before the catalog starts rejects with the reason and opens nothing', async () => {

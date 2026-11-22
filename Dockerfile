@@ -1,10 +1,10 @@
 # syntax=docker/dockerfile:1
 #
-# wabgpt application image (WhatsApp <-> ChatGPT bridge, owner dashboard).
+# warelay application image (WhatsApp <-> ChatGPT, Claude and Gemini relay, owner dashboard).
 # BrowserOS Neo is NOT part of this image: Compose pulls the official upstream
 # image separately. See compose.yaml and docs/guides/docker-compose.md.
 #
-#   docker compose build wabgpt
+#   docker compose build warelay
 
 # --- build: compile TypeScript with dev dependencies -------------------------
 FROM node:24-bookworm-slim AS build
@@ -26,9 +26,9 @@ RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 # --- runtime ------------------------------------------------------------------
 FROM node:24-bookworm-slim AS runtime
 
-LABEL org.opencontainers.image.title="wabgpt" \
-      org.opencontainers.image.description="Single-user WhatsApp to ChatGPT bridge with an owner dashboard" \
-      org.opencontainers.image.licenses="MIT AND GPL-3.0-only (see /usr/share/doc/wabgpt/THIRD_PARTY_NOTICES.md)"
+LABEL org.opencontainers.image.title="warelay" \
+      org.opencontainers.image.description="Single-user WhatsApp relay to ChatGPT, Claude and Gemini with an owner dashboard" \
+      org.opencontainers.image.licenses="MIT AND GPL-3.0-only (see /usr/share/doc/warelay/THIRD_PARTY_NOTICES.md)"
 
 ENV NODE_ENV=production
 WORKDIR /app
@@ -41,16 +41,16 @@ COPY web ./web
 
 # Licence texts travel with the image. Each dependency also keeps its own
 # LICENSE file inside node_modules.
-COPY LICENSE THIRD_PARTY_NOTICES.md /usr/share/doc/wabgpt/
-COPY licenses/ /usr/share/doc/wabgpt/licenses/
+COPY LICENSE THIRD_PARTY_NOTICES.md /usr/share/doc/warelay/
+COPY licenses/ /usr/share/doc/warelay/licenses/
 
 # Secret-free deployment config; the owner token is generated into /data on
 # first start and never baked into the image.
-COPY deploy/config.json /etc/wabgpt/config.json
+COPY deploy/config.json /etc/warelay/config.json
 
-# Convenience launcher so `docker compose exec wabgpt wabgpt token ...` works.
-RUN printf '#!/bin/sh\nexec node /app/dist/cli.js "$@"\n' > /usr/local/bin/wabgpt \
- && chmod 0755 /usr/local/bin/wabgpt \
+# Convenience launcher so `docker compose exec warelay warelay token ...` works.
+RUN printf '#!/bin/sh\nexec node /app/dist/cli.js "$@"\n' > /usr/local/bin/warelay \
+ && chmod 0755 /usr/local/bin/warelay \
  && install -d -m 0700 -o node -g node /data
 
 # Non-root. A new named volume mounted at /data inherits this ownership.
@@ -59,4 +59,4 @@ VOLUME ["/data"]
 EXPOSE 8788
 
 ENTRYPOINT ["node", "/app/dist/cli.js"]
-CMD ["serve", "--config", "/etc/wabgpt/config.json"]
+CMD ["serve", "--config", "/etc/warelay/config.json"]

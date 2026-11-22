@@ -41,7 +41,7 @@ async function fixture(run: (store: RoutingState, time: { now: number }) => Prom
     await store.enable(alice);
     await store.setSettings({ providers: ['chatgpt', 'claude'], retriesBeforeFallback: 1, options: {} });
     await run(store, time);
-  }, 'wabgpt-fallback-');
+  }, 'warelay-fallback-');
 }
 const routerOf = (store: RoutingState, adapters: AssistantAdapter[], time: { now: number }, logs: string[] = []) =>
   createFallbackAssistant({ adapters, port: store, logger: text => logs.push(text), now: () => time.now, pause: async () => {} });

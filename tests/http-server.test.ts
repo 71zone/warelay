@@ -43,13 +43,13 @@ test('every private read, stream and mutation requires a signed-in session', asy
   await withServer(async harness => {
     for (const path of ['/api/state', '/api/projects']) assert.equal((await harness.request('GET', path)).status, 401, path);
     assert.equal((await harness.events(null)).status, 401);
-    const bogus = { cookie: 'wabgpt_session=not-a-real-session', csrf: 'x' };
+    const bogus = { cookie: 'warelay_session=not-a-real-session', csrf: 'x' };
     assert.equal((await harness.api(bogus, 'GET', '/api/state')).status, 401);
     for (const path of ['/api/logout', '/api/channel/connect', '/api/browser/check', '/api/forwarding/resume', '/api/forwarding/pause']) {
       assert.equal((await harness.api(bogus, 'POST', path)).status, 401, path);
     }
     assert.equal((await harness.api(bogus, 'POST', '/api/contacts', { input: '+14155550199' })).status, 401);
-    assert.equal((await harness.request('GET', '/api/state', { headers: { cookie: `wabgpt_session=${harness.token}` } })).status, 401);
+    assert.equal((await harness.request('GET', '/api/state', { headers: { cookie: `warelay_session=${harness.token}` } })).status, 401);
     assert.equal((await harness.request('GET', '/api/state', { headers: { authorization: `Bearer ${harness.token}`, 'x-owner-token': harness.token } })).status, 401);
     await assertNothingChanged(harness);
   });
@@ -74,7 +74,7 @@ test('login issues an HttpOnly SameSite=Strict session and never leaks the owner
     const reply = await harness.login();
     assert.equal(reply.status, 200);
     const cookie = String(reply.headers['set-cookie']?.[0]);
-    assert.match(cookie, /^wabgpt_session=[A-Za-z0-9_-]{43,};/);
+    assert.match(cookie, /^warelay_session=[A-Za-z0-9_-]{43,};/);
     assert.match(cookie, /; Path=\//);
     assert.match(cookie, /; HttpOnly/);
     assert.match(cookie, /; SameSite=Strict/);
@@ -432,7 +432,7 @@ test('logout revokes the session, clears the cookie and ends its open event stre
 
     const out = await harness.api(session, 'POST', '/api/logout');
     assert.equal(out.status, 200);
-    assert.match(String(out.headers['set-cookie']?.[0]), /^wabgpt_session=; .*Max-Age=0/);
+    assert.match(String(out.headers['set-cookie']?.[0]), /^warelay_session=; .*Max-Age=0/);
     await stream.ended;
     assert.equal((await harness.api(session, 'GET', '/api/state')).status, 401);
     assert.equal((await harness.api(session, 'POST', '/api/forwarding/pause')).status, 401);
@@ -499,25 +499,25 @@ test('closing the server ends streams, detaches from the Application and leaves 
 
 test('serving behind a trusted HTTPS public origin uses a __Host- Secure cookie and that origin for CSRF', async () => {
   await withServer(async harness => {
-    const publicOrigin = 'https://wabgpt.example.com';
-    const asPublic = { host: 'wabgpt.example.com', origin: publicOrigin };
+    const publicOrigin = 'https://warelay.example.com';
+    const asPublic = { host: 'warelay.example.com', origin: publicOrigin };
     const login = await harness.request('POST', '/api/login', { headers: { ...asPublic, 'content-type': 'application/json' }, body: JSON.stringify({ token: harness.token }) });
     assert.equal(login.status, 200);
     const cookie = String(login.headers['set-cookie']?.[0]);
-    assert.match(cookie, /^__Host-wabgpt_session=[A-Za-z0-9_-]{43,}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=\d+; Secure$/);
+    assert.match(cookie, /^__Host-warelay_session=[A-Za-z0-9_-]{43,}; Path=\/; HttpOnly; SameSite=Strict; Max-Age=\d+; Secure$/);
     const session = sessionOf(login);
     const publicApi = (method: string, path: string, body?: unknown) => harness.request(method, path, { headers: { ...asPublic, cookie: session.cookie, 'x-csrf-token': session.csrf, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
     assert.equal((await publicApi('GET', '/api/state')).status, 200);
     assert.equal((await publicApi('POST', '/api/forwarding/pause', {})).status, 200);
-    const wrongOrigin = await harness.request('POST', '/api/forwarding/pause', { headers: { host: 'wabgpt.example.com', origin: harness.origin, cookie: session.cookie, 'x-csrf-token': session.csrf, 'content-type': 'application/json' }, body: '{}' });
+    const wrongOrigin = await harness.request('POST', '/api/forwarding/pause', { headers: { host: 'warelay.example.com', origin: harness.origin, cookie: session.cookie, 'x-csrf-token': session.csrf, 'content-type': 'application/json' }, body: '{}' });
     assert.equal(wrongOrigin.status, 403);
     assert.equal((await harness.request('GET', '/', { headers: { host: 'other.example.com' } })).status, 421);
     // The plain cookie name is not accepted for the public origin, and the loopback path keeps its own plain cookie.
-    assert.equal((await harness.request('GET', '/api/state', { headers: { ...asPublic, cookie: `wabgpt_session=${session.cookie.split('=')[1]}` } })).status, 401);
+    assert.equal((await harness.request('GET', '/api/state', { headers: { ...asPublic, cookie: `warelay_session=${session.cookie.split('=')[1]}` } })).status, 401);
     const local = await harness.signIn();
     assert.equal((await harness.api(local, 'GET', '/api/state')).status, 200);
-    assert.equal((await harness.api(local, 'GET', '/api/state', undefined, { host: 'wabgpt.example.com' })).status, 401);
-  }, { publicOrigin: 'https://wabgpt.example.com' });
+    assert.equal((await harness.api(local, 'GET', '/api/state', undefined, { host: 'warelay.example.com' })).status, 401);
+  }, { publicOrigin: 'https://warelay.example.com' });
 });
 
 test('the served token file is the owner token and a stale token is rejected', async () => {

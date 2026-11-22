@@ -1,12 +1,12 @@
 ---
 type: Reference
 title: Terminal dashboard
-description: Panels, keys, prompts, the project picker and what pausing does in the interactive wabgpt dashboard.
+description: Panels, keys, prompts, the project picker and what pausing does in the interactive warelay dashboard.
 ---
 
 # Terminal dashboard
 
-`wabgpt` with no command opens an interactive dashboard over the same core and data directory as [`wabgpt serve`](http-api.md). It needs an interactive terminal; a window at least 90 columns by 34 rows shows the full layout with every control on screen. On a fresh install the guided setup runs first; see [Getting started](../guides/getting-started.md). Command line: [Configuration](configuration.md#command-line). Source: [`src/interfaces/tui/tui.ts`](../../src/interfaces/tui/tui.ts), [`src/interfaces/tui/project-picker.ts`](../../src/interfaces/tui/project-picker.ts), [`src/core/duration.ts`](../../src/core/duration.ts).
+`warelay` with no command opens an interactive dashboard over the same core and data directory as [`warelay serve`](http-api.md). It needs an interactive terminal; a window at least 90 columns by 34 rows shows the full layout with every control on screen. On a fresh install the guided setup runs first; see [Getting started](../guides/getting-started.md). Command line: [Configuration](configuration.md#command-line). Source: [`src/interfaces/tui/tui.ts`](../../src/interfaces/tui/tui.ts), [`src/interfaces/tui/project-picker.ts`](../../src/interfaces/tui/project-picker.ts), [`src/core/duration.ts`](../../src/core/duration.ts).
 
 ## Panels
 
@@ -37,7 +37,7 @@ What each panel's data means: [Conversations](../concepts/conversations.md), [De
 | G | Open the searchable project picker for the selected contact. A tab strip shows every enabled assistant (`●` marks one that already has a project for this contact); Left/Right, F6 or P switch assistant, and each assistant keeps its own project (see below) |
 | T | Set the selected contact's fixed conversation lifetime: minutes, `90m`, `12h`, `3d` or `never`; empty means 24h |
 | O | Open the Assistants screen (no typing): a checkbox per assistant with its priority position (`1. ChatGPT primary`, `2. Claude fallback 1`), Space switches it on or off (at least one stays on), Shift+Up/Down or `+`/`-` move it up or down the priority, Left/Right or `+`/`-` step the retries before falling back (0 to 10, default 2) and cycle an assistant's own options (Gemini: Google account index 0 to 3), Enter or S saves, Esc cancels. Saved in `state.json`; see [Fallback assistants](../concepts/delivery.md#fallback-assistants) |
-| X | Restart wabgpt in the same terminal. It waits for any in-progress reply to finish, releases the data-directory lock, and a fresh process starts and resumes enabled sessions without pressing R. The new process picks up a rebuilt `dist/` or a changed config. WhatsApp allows one connection per linked device, so there is a gap of a few seconds while it relaunches; messages sent during the gap are forwarded once it reconnects. A message that arrives while the old process is still finishing a reply is not forwarded. |
+| X | Restart warelay in the same terminal. It waits for any in-progress reply to finish, releases the data-directory lock, and a fresh process starts and resumes enabled sessions without pressing R. The new process picks up a rebuilt `dist/` or a changed config. WhatsApp allows one connection per linked device, so there is a gap of a few seconds while it relaunches; messages sent during the gap are forwarded once it reconnects. A message that arrives while the old process is still finishing a reply is not forwarded. |
 | Q or Ctrl-C | Quit and retain settings |
 
 Toolbar buttons also accept mouse clicks. Buttons and keys are ignored while an input prompt, the project picker or the QR overlay is open. Escape hides a QR overlay, cancels a prompt or picker, or clears a search.

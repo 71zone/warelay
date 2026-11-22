@@ -16,7 +16,7 @@ const tail = /,(\d+|\{"id":\d+,"offset":\d+,"length":\d+\})\); return result\.va
 
 /** A BrowserOS session whose page serves `sources` through the same staging, chunk and release scripts the adapter sends. */
 function fakePage(sources: Map<number, Source>): { context: AssetContext; calls: string[]; released: number[]; allocated: string[]; directory: string } {
-  const directory = join(tmpdir(), `wabgpt-assets-${process.pid}-${Math.random().toString(16).slice(2)}`);
+  const directory = join(tmpdir(), `warelay-assets-${process.pid}-${Math.random().toString(16).slice(2)}`);
   const store = createMediaStore(directory);
   const allocated: string[] = [];
   const calls: string[] = [];

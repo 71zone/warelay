@@ -56,7 +56,7 @@ async function startManagedBrowser(config: LoadedConfig, options: PrepareOptions
       io.write(`\nThe managed BrowserOS browser is not available: ${errorText(error)}\n`);
       const answer = (await ask(io, allowBack
         ? "Fix that (for example start Docker), then press Enter to retry, or type 'b' to choose a different browser: "
-        : 'Fix that (for example start Docker), then press Enter to retry. Press Ctrl-C to stop; "wabgpt setup" can pick another browser: ')).toLowerCase();
+        : 'Fix that (for example start Docker), then press Enter to retry. Press Ctrl-C to stop; "warelay setup" can pick another browser: ')).toLowerCase();
       if (allowBack && (answer === 'b' || answer === 'back')) return 'back';
     }
   }
@@ -105,13 +105,13 @@ async function selectNative(config: LoadedConfig, options: PrepareOptions, deps:
 
 async function chooseBrowser(config: LoadedConfig, options: PrepareOptions, deps: OnboardingDependencies, previous: BrowserSelection | undefined): Promise<PreparedOnboarding> {
   const { io } = options;
-  io.write('\nWelcome to wabgpt. It forwards chosen WhatsApp contacts to ChatGPT through the BrowserOS browser and sends the reply back.\n');
+  io.write('\nWelcome to warelay. It forwards chosen WhatsApp contacts to ChatGPT through the BrowserOS browser and sends the reply back.\n');
   io.write('Setup takes a few minutes and you can stop with Ctrl-C at any point and continue later.\n');
   let current = config;
   for (;;) {
-    io.write('\nWhich BrowserOS should wabgpt use?\n');
+    io.write('\nWhich BrowserOS should warelay use?\n');
     io.write('  1) BrowserOS already installed on this computer (uses the ChatGPT login it already has)\n');
-    io.write('  2) Let wabgpt download BrowserOS and run it for you in Docker, with its own isolated, persistent profile.\n');
+    io.write('  2) Let warelay download BrowserOS and run it for you in Docker, with its own isolated, persistent profile.\n');
     io.write('     Its control and viewer ports are reachable from this computer only. No Docker Compose commands are needed.\n');
     const answer = await ask(io, `Choose 1 or 2${previous ? ` [${previous.mode === 'native' ? 1 : 2}]` : ''}: `);
     const mode = answer === '1' ? 'native' : answer === '2' ? 'docker' : answer === '' ? previous?.mode : undefined;
@@ -157,7 +157,7 @@ export async function prepareOnboarding(config: LoadedConfig, options: PrepareOp
   if (!existing) await writeSetupState(config.dataDir, pendingSetup());
   if (!options.force && existing && existing.stage !== 'browser') {
     const resumed = existing;
-    options.io.write(`\nContinuing wabgpt setup where you left off (${resumed.stage === 'chatgpt' ? 'ChatGPT sign-in' : resumed.stage === 'whatsapp' ? 'WhatsApp' : 'first contact'}).\n`);
+    options.io.write(`\nContinuing warelay setup where you left off (${resumed.stage === 'chatgpt' ? 'ChatGPT sign-in' : resumed.stage === 'whatsapp' ? 'WhatsApp' : 'first contact'}).\n`);
     if (resumed.browser.mode === 'native') return { config, setup: resumed };
     const outcome = await startManagedBrowser(config, options, deps, true);
     if (outcome !== 'back') {

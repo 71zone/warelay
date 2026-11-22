@@ -1,12 +1,12 @@
 ---
 type: Guide
-title: Extending wabgpt
+title: Extending warelay
 description: Add a messaging channel, assistant, storage or frontend by implementing a small interface and changing one composition point.
 ---
 
-# Extending wabgpt
+# Extending warelay
 
-wabgpt separates a provider-neutral core from concrete adapters and frontends. You extend it by implementing a small interface and changing one composition point. There is no plugin registry, no dynamic loading and no configuration-driven provider selection; that is deliberate for a single-owner tool.
+warelay separates a provider-neutral core from concrete adapters and frontends. You extend it by implementing a small interface and changing one composition point. There is no plugin registry, no dynamic loading and no configuration-driven provider selection; that is deliberate for a single-owner tool.
 
 For the behavior these interfaces carry, see [delivery](../concepts/delivery.md) and [conversations](../concepts/conversations.md). For project verification expectations, see [CONTRIBUTING.md](../../CONTRIBUTING.md).
 
@@ -207,7 +207,7 @@ Depend only on `Application`:
 - Call `application.restore()` after you are subscribed, so early QR codes and status changes are not missed.
 - Do not close the application from a frontend that did not create the runtime; the creator of the runtime owns `close()`.
 
-The HTTP frontend follows this pattern: `startHttpServer({ application, settings })` returns `{ url, close() }` and neither restores nor closes the application. The lifecycle around it lives in [`src/serve.ts`](../../src/serve.ts): `serveUntilStopped({ runtime, settings, stopped, output })` starts the server, then calls `application.restore()` once the server is subscribed (a failed restore is logged and leaves the dashboard up with forwarding disarmed), and on stop closes the server first and the runtime second. A new long-running frontend should reuse that ordering. See the [HTTP API reference](../reference/http-api.md) for the authentication, session and API rules, and [Run wabgpt as a server](server.md) for running it.
+The HTTP frontend follows this pattern: `startHttpServer({ application, settings })` returns `{ url, close() }` and neither restores nor closes the application. The lifecycle around it lives in [`src/serve.ts`](../../src/serve.ts): `serveUntilStopped({ runtime, settings, stopped, output })` starts the server, then calls `application.restore()` once the server is subscribed (a failed restore is logged and leaves the dashboard up with forwarding disarmed), and on stop closes the server first and the runtime second. A new long-running frontend should reuse that ordering. See the [HTTP API reference](../reference/http-api.md) for the authentication, session and API rules, and [Run warelay as a server](server.md) for running it.
 
 ## Testing an extension
 

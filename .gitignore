@@ -14,12 +14,14 @@ npm-debug.log*
 .env.*
 !.env.example
 
-# wabgpt runtime data: WhatsApp credentials, routing state, locks, tokens.
-# The default location is ~/.wa-chatgpt, outside the checkout. These patterns
+# warelay runtime data: WhatsApp credentials, routing state, locks, tokens.
+# The default location is ~/.warelay (or the legacy ~/.wa-chatgpt), outside the checkout. These patterns
 # protect you if you point dataDir inside the repository. Directory names are
 # anchored to the repository root so source folders such as
 # src/adapters/whatsapp/ stay tracked.
+.warelay/
 .wa-chatgpt/
+**/.warelay/
 **/.wa-chatgpt/
 /whatsapp/
 /auth/
@@ -58,7 +60,7 @@ onboarding.json.*
 *.tar
 *.tar.gz
 *.tar.zst
-wabgpt-*.tar*
+warelay-*.tar*
 
 # Editor and OS files
 .DS_Store

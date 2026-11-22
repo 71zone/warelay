@@ -1,12 +1,12 @@
 ---
 type: Reference
 title: Local data
-description: What wabgpt stores in its data directory, what survives a restart, file privacy, state versioning and the single-writer lock.
+description: What warelay stores in its data directory, what survives a restart, file privacy, state versioning and the single-writer lock.
 ---
 
 # Local data
 
-Everything wabgpt remembers lives in one data directory (`dataDir` in [Configuration](configuration.md); `~/.wa-chatgpt` by default). Source: [`src/adapters/storage/json-state.ts`](../../src/adapters/storage/json-state.ts), [`src/core/state.ts`](../../src/core/state.ts), [`src/infrastructure/lock.ts`](../../src/infrastructure/lock.ts), [`src/onboarding/state.ts`](../../src/onboarding/state.ts), [`src/adapters/whatsapp/directory.ts`](../../src/adapters/whatsapp/directory.ts).
+Everything warelay remembers lives in one data directory (`dataDir` in [Configuration](configuration.md); `~/.warelay` by default, or the pre-rename `~/.wa-chatgpt` when only that directory exists). Source: [`src/adapters/storage/json-state.ts`](../../src/adapters/storage/json-state.ts), [`src/core/state.ts`](../../src/core/state.ts), [`src/infrastructure/lock.ts`](../../src/infrastructure/lock.ts), [`src/onboarding/state.ts`](../../src/onboarding/state.ts), [`src/adapters/whatsapp/directory.ts`](../../src/adapters/whatsapp/directory.ts).
 
 ## What is stored
 
@@ -15,7 +15,7 @@ Everything wabgpt remembers lives in one data directory (`dataDir` in [Configura
 | `state.json` | Forwarding sessions and the delivery journal: contact names, JIDs, per-assistant project and conversation references, lifetimes, conversation start times, activity metadata, processed message IDs and verified identity aliases. Also the assistant order and retry setting, the time each limited assistant is usable again, and each contact's recent turns (see below). |
 | `whatsapp/` | WhatsApp linked-device credentials and the persisted contact/chat directory. Do not share this directory. |
 | `onboarding.json` | Only first-run setup progress: which browser you chose, the stage reached and timestamps. Also remembers your previous native `browserMcpUrl` when the managed browser replaces it. |
-| `server-token` | The owner token for `wabgpt serve`, unless `server.tokenFile` points elsewhere. Mode 0600. |
+| `server-token` | The owner token for `warelay serve`, unless `server.tokenFile` points elsewhere. Mode 0600. |
 | `bridge.lock` | The single-writer lock, present only while a process runs. |
 | `state.json.v1.bak` | Backup of an older-format state file; see below. |
 
@@ -26,7 +26,7 @@ Message bodies and reply bodies are **not** stored, with one bounded exception: 
 - WhatsApp linked-device credentials reconnect without another QR scan unless the session was unlinked or expired.
 - Synced contact names, phone/LID identity mappings, recent direct chats and their activity metadata are saved to disk and are available before another history sync arrives.
 - Enabled/paused contact choices, each contact's project, lifetime and conversation URL per assistant, the time each conversation started, the assistant order and which assistants are limited until when are retained.
-- Previously active forwarding resumes automatically. A global pause also survives restart. Sessions paused after a delivery error stay paused until explicitly enabled again. First-run setup and `wabgpt setup` pause forwarding while they run, so after either one press R in the dashboard to start the enabled contacts.
+- Previously active forwarding resumes automatically. A global pause also survives restart. Sessions paused after a delivery error stay paused until explicitly enabled again. First-run setup and `warelay setup` pause forwarding while they run, so after either one press R in the dashboard to start the enabled contacts.
 - Interrupted deliveries are quarantined on restart rather than replayed; see [Delivery](../concepts/delivery.md#errors-and-pausing).
 - Quitting does not disable configured sessions and does not stop or delete a managed Docker browser or its profile. Opening the dashboard again restores the last running preference.
 
@@ -46,7 +46,7 @@ WhatsApp can identify one account by both a LID and a phone number. Verified map
 
 ## Single-writer lock
 
-A lock prevents simultaneous processes (terminal or server) from using the same credentials and state, so the dashboard and `wabgpt serve` cannot run against one data directory at once. The lock is the file `bridge.lock` (`~/.wa-chatgpt/bridge.lock` by default) and contains the owning process ID. A leftover lock is never removed automatically, because only you can tell whether the owner still runs. After a crash, verify the previous process has stopped before removing `bridge.lock`; the startup error names the path. Stale-lock steps: [Troubleshooting](../runbooks/troubleshooting.md).
+A lock prevents simultaneous processes (terminal or server) from using the same credentials and state, so the dashboard and `warelay serve` cannot run against one data directory at once. The lock is the file `bridge.lock` (`~/.warelay/bridge.lock` by default) and contains the owning process ID. If the recorded process no longer exists on this host (for example after a crash), the next start reclaims the lock by itself. A lock whose owner is still running, or whose contents cannot be read, is never removed automatically; verify the owner has stopped before removing `bridge.lock` yourself, the startup error names the path. Stale-lock steps: [Troubleshooting](../runbooks/troubleshooting.md).
 
 ## Keep it out of Git
 
@@ -54,4 +54,4 @@ Keep the data directory outside any Git checkout. If you point `dataDir` inside 
 
 ## Risks that follow from the data
 
-Baileys (`@whiskeysockets/baileys`) is unofficial and the pinned version is a release candidate. WhatsApp can restrict accounts using unofficial clients. Browser automation can break when ChatGPT changes its UI. Login expiry, rate limits and verification challenges require manual attention in BrowserOS; the app does not bypass them or switch silently to an API. wabgpt is built for one owner and does not use the OpenAI API. See also the [security policy](../../SECURITY.md) and the [motivation and policy notice](../concepts/motivation.md).
+Baileys (`@whiskeysockets/baileys`) is unofficial and the pinned version is a release candidate. WhatsApp can restrict accounts using unofficial clients. Browser automation can break when ChatGPT changes its UI. Login expiry, rate limits and verification challenges require manual attention in BrowserOS; the app does not bypass them or switch silently to an API. warelay is built for one owner and does not use the OpenAI API. See also the [security policy](../../SECURITY.md) and the [motivation and policy notice](../concepts/motivation.md).

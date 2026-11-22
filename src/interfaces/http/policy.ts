@@ -4,7 +4,7 @@ export interface HttpServerSettings {
   host: string;
   port: number;
   tokenFile: string;
-  /** Trusted external origin when a TLS reverse proxy fronts the server, for example https://wabgpt.example.com. */
+  /** Trusted external origin when a TLS reverse proxy fronts the server, for example https://warelay.example.com. */
   publicOrigin?: string;
 }
 

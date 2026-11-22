@@ -2,9 +2,9 @@ import { spawn, type ChildProcess } from 'node:child_process';
 
 /** Exit status a dashboard process uses to ask its supervisor for a fresh process after a graceful stop. */
 export const RESTART_EXIT_CODE = 75;
-const SUPERVISED = 'WABGPT_SUPERVISED';
-const SESSION_START = 'WABGPT_SESSION_START';
-const RESTARTED = 'WABGPT_RESTARTED';
+const SUPERVISED = 'WARELAY_SUPERVISED';
+const SESSION_START = 'WARELAY_SESSION_START';
+const RESTARTED = 'WARELAY_RESTARTED';
 const forwarded = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
 
 export function isSupervised(): boolean { return process.env[SUPERVISED] === '1'; }

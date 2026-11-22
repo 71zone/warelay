@@ -16,6 +16,7 @@
 # Tests, local data and caches inside allowed directories never enter the image.
 **/*.test.ts
 **/node_modules
+**/.warelay
 **/.wa-chatgpt
 **/state.json
 **/creds.json

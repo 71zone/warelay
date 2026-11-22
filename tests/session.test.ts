@@ -30,7 +30,7 @@ test('active sessions resume with their conversation, while a global pause survi
     assert.equal(paused.snapshot().routes[0]?.enabled, true);
     assert.equal(paused.snapshot().routes[0]?.refs.chatgpt?.conversationRef, 'https://chatgpt.com/c/retained');
     await paused.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('pausing while the assistant connects does not arm forwarding after the connection completes', async () => {
@@ -43,7 +43,7 @@ test('pausing while the assistant connects does not arm forwarding after the con
     assert.equal(app.snapshot().armed, false);
     assert.equal((await loadState(directory)).isRunning(), false);
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('configuring a project and lifetime saves a paused route, emits changes, and never starts forwarding or the assistant', async () => {
@@ -63,7 +63,7 @@ test('configuring a project and lifetime saves a paused route, emits changes, an
     await app.setProject(contact, null);
     assert.equal(app.snapshot().routes[0]?.refs.chatgpt?.projectRef, null);
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('configuration is rejected while a delivery is working and then leaves the route unchanged', async () => {
@@ -76,7 +76,7 @@ test('configuration is rejected while a delivery is working and then leaves the 
     assert.equal(app.snapshot().routes[0]?.refs.chatgpt?.projectRef, null);
     assert.equal(app.snapshot().routes[0]?.conversationTtlMinutes, 1440);
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('project catalog discovery is single-flight, never starts the delivery assistant, retries after failure and is awaited by close', async () => {
@@ -102,7 +102,7 @@ test('project catalog discovery is single-flight, never starts the delivery assi
     assert.deepEqual(await first, projects);
     await closing;
     assert.equal(stopped, true);
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('catalog results are copies and close is single-flight', async () => {
@@ -122,7 +122,7 @@ test('catalog results are copies and close is single-flight', async () => {
     release.resolve(); await first;
     await app.close();
     assert.equal(stops, 1);
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('restore starts the channel only when the adapter reports a saved session, without any filesystem probe', async () => {
@@ -135,7 +135,7 @@ test('restore starts the channel only when the adapter reports a saved session, 
       assert.equal(starts, saved ? 1 : 0);
       assert.equal(app.snapshot().channelStatus, saved ? 'connecting' : 'disconnected');
       await app.close();
-    }, 'wabgpt-app-');
+    }, 'warelay-app-');
   }
 });
 
@@ -156,7 +156,7 @@ test('channel status changes are exposed generically and terminal failures disar
     assert.equal(app.snapshot().armed, false);
     assert.ok(logs.includes('WhatsApp: logged-out'));
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('setContactEnabled is idempotent desired state and resumes forwarding only when it newly enables', async () => {
@@ -184,7 +184,7 @@ test('setContactEnabled is idempotent desired state and resumes forwarding only 
     await app.toggle(contact);
     assert.equal(app.snapshot().routes[0]?.enabled, false);
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('addContact resolves through the channel, enables the contact once, and rejects unusable input without a route', async () => {
@@ -208,7 +208,7 @@ test('addContact resolves through the channel, enables the contact once, and rej
     assert.equal(app.snapshot().routes.length, 1);
     assert.deepEqual(resolved, ['bad', '+1 555 555 0123', '+1 555 555 0123']);
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('snapshot merges saved routes, recent chats and known contacts into one sorted directory', async () => {
@@ -221,7 +221,7 @@ test('snapshot merges saved routes, recent chats and known contacts into one sor
     assert.deepEqual(snapshot.directory, [{ id: 'contact-only', name: 'Mid' }, { id: 'chat-only', name: 'Renamed Alpha' }, { id: 'route-only', name: 'Zed' }]);
     assert.deepEqual(snapshot.chats, [chat]);
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('identity links persist through the application and signal a change', async () => {
@@ -233,7 +233,7 @@ test('identity links persist through the application and signal a change', async
     assert.equal(changes, 1);
     assert.equal(store.canonicalId('123456789@lid'), contact.id);
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('an application backed by a non-URL reference policy assigns projects and lifetimes without knowing their format', async () => {
@@ -246,7 +246,7 @@ test('an application backed by a non-URL reference policy assigns projects and l
     await assert.rejects(app.setProject(contact, 'https://chatgpt.com/g/g-p-' + 'a'.repeat(32)), /ws:<name>/);
     assert.equal((await loadState(directory, () => 2, opaqueReferences)).route(contact.id)?.refs.chatgpt?.projectRef, 'ws:research');
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('addContact keeps a saved route name when the provider directory is empty, and known provider names win', async () => {
@@ -276,7 +276,7 @@ test('addContact keeps a saved route name when the provider directory is empty, 
     assert.equal(app.snapshot().routes[0]?.name, 'Fresh Provider Name');
     assert.equal(app.snapshot().routes.length, 1);
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 /** An assistant whose catalog honours its signal: on abort it finishes asynchronous cleanup, records it, and only then rejects. */
@@ -318,7 +318,7 @@ test('a catalog caller that aborts is rejected with its reason only after the ad
     await app.close();
     await secondRejected;
     assert.equal(cleaned(), 2);
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('one caller aborting does not cancel a catalog another caller still waits for, but the last one leaving does', async () => {
@@ -338,7 +338,7 @@ test('one caller aborting does not cancel a catalog another caller still waits f
     await secondRejected;
     assert.equal(cleaned(), 1);
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('a caller without a signal keeps the catalog alive when a signalled caller leaves; close then cancels it and waits for the adapter to drain', async () => {
@@ -359,7 +359,7 @@ test('a caller without a signal keeps the catalog alive when a signalled caller 
     await pinnedRejected;
     assert.equal(signals[0]?.aborted, true);
     assert.deepEqual(stops, ['channel:1', 'assistant:1']);
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });
 
 test('an already aborted signal is rejected without touching the adapter', async () => {
@@ -369,5 +369,5 @@ test('an already aborted signal is rejected without touching the adapter', async
     await assert.rejects(app.listProjects(undefined, AbortSignal.abort(new Error('already cancelled'))), /already cancelled/);
     assert.equal(signals.length, 0);
     await app.close();
-  }, 'wabgpt-app-');
+  }, 'warelay-app-');
 });

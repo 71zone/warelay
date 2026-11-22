@@ -1,12 +1,12 @@
 ---
 type: Concept
 title: Motivation and approach
-description: Why wabgpt started as a family WhatsApp bridge, and the limits of using ChatGPT through a browser.
+description: Why warelay started as a family WhatsApp bridge, and the limits of using AI assistants (ChatGPT, Claude, Gemini) through a browser.
 tags: [motivation, family, browser, policy]
 sources:
   - id: maintainer-interview
-    resource: "Maintainer interview about wabgpt, 2026-11-11"
-    title: Why wabgpt was built
+    resource: "Maintainer interview about warelay, 2026-11-11"
+    title: Why warelay was built
   - id: openai-terms
     resource: https://openai.com/policies/terms-of-use/
     title: OpenAI Terms of Use
@@ -16,7 +16,7 @@ sources:
 
 ## Built for my wife
 
-I built wabgpt for my wife. Her workplace's website allowlist blocks the ChatGPT site while WhatsApp remains available. My understanding is that there is no separate policy prohibiting AI use.[^maintainer-interview]
+I built warelay for my wife. Her workplace's website allowlist blocks AI assistant sites such as ChatGPT while WhatsApp remains available. My understanding is that there is no separate policy prohibiting AI use.[^maintainer-interview]
 
 She mainly wants help reasoning through problems and getting spreadsheet advice. Since she can already use WhatsApp, I made it the chat interface. She does not need a separate web app, my ChatGPT password, or API keys, and I could reuse the ChatGPT subscription I already had.[^maintainer-interview]
 
@@ -24,17 +24,17 @@ This describes a network-access constraint, not employer approval. Permission to
 
 ## Put setup on the owner's side
 
-The recipient uses WhatsApp. The owner installs wabgpt, signs into ChatGPT in BrowserOS, links WhatsApp, and chooses which contacts may receive automatic replies. Recipients do not receive the owner's ChatGPT credentials.
+The recipient uses WhatsApp. The owner installs warelay, signs into ChatGPT in BrowserOS, links WhatsApp, and chooses which contacts may receive automatic replies. Recipients do not receive the owner's ChatGPT credentials.
 
 The owner still has work to do: keep the machine and browser available, renew expired logins, and understand where the selected contacts' messages are sent. Forwarding is an explicit opt-in, not a background default. See [first-run setup](../guides/getting-started.md).
 
 ## Keep each person's context separate
 
-Each enabled contact has a separate saved ChatGPT conversation. A contact can also have a dedicated ChatGPT project and a fixed conversation lifetime. The owner must set project-only memory in ChatGPT; wabgpt cannot verify or change that setting. See [projects and conversation lifetimes](conversations.md).
+Each enabled contact has a separate saved ChatGPT conversation. A contact can also have a dedicated ChatGPT project and a fixed conversation lifetime. The owner must set project-only memory in ChatGPT; warelay cannot verify or change that setting. See [projects and conversation lifetimes](conversations.md).
 
 ## Why a browser bridge
 
-Using BrowserOS lets wabgpt interact with ChatGPT's existing web interface and projects. It does not use the OpenAI API or require a separate API key.
+Using BrowserOS lets warelay interact with the existing web interfaces of AI assistants (ChatGPT, Claude and Gemini) and their projects. It does not use the OpenAI API or require a separate API key.
 
 The tradeoff is dependence on that interface. UI changes, login expiry, verification challenges and account limits can interrupt the bridge. Native BrowserOS and an isolated managed Docker browser are both supported; neither removes those limitations. See [browser setup](../guides/getting-started.md) and [delivery behavior](delivery.md).
 

@@ -47,8 +47,8 @@ export function mergeProjects(rows: { id: string; name: string }[]): Project[] {
     const name = row.name.replace(/\s+/g, ' ').trim();
     let ref: string;
     try { ref = normalizeProjectUrl(`https://claude.ai/project/${row.id}`); }
-    catch { throw new Error(`Claude's project list contains an entry with an unrecognised id (${JSON.stringify(row.id)}). Update wabgpt before choosing a project.`); }
-    if (!name) throw new Error("Claude's project list contains a project without a readable name. Update wabgpt before choosing a project.");
+    catch { throw new Error(`Claude's project list contains an entry with an unrecognised id (${JSON.stringify(row.id)}). Update warelay before choosing a project.`); }
+    if (!name) throw new Error("Claude's project list contains a project without a readable name. Update warelay before choosing a project.");
     if (!byRef.has(ref)) byRef.set(ref, { name, ref });
   }
   return [...byRef.values()].sort((a, b) => collator.compare(a.name, b.name) || (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));

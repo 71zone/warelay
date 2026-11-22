@@ -1,6 +1,6 @@
 # Third-party notices
 
-wabgpt's original code is MIT-licensed (see `LICENSE`). Choosing MIT for that code does **not** relicense anything below, and it does not make a combined build, bundle or container image that includes these components MIT. Each component stays under its own terms. This file is an engineering inventory, not legal advice.
+warelay's original code is MIT-licensed (see `LICENSE`). Choosing MIT for that code does **not** relicense anything below, and it does not make a combined build, bundle or container image that includes these components MIT. Each component stays under its own terms. This file is an engineering inventory, not legal advice.
 
 It was written from the repository's `package.json`, `package-lock.json` and the installed copies of the packages. Lockfile license fields are what the packages declare; they were not independently audited. Re-check them whenever dependencies change.
 
@@ -10,7 +10,7 @@ It was written from the repository's `package.json`, `package-lock.json` and the
 
 - Pulled in by `@whiskeysockets/baileys` (declared MIT) and imported at run time for WhatsApp's end-to-end encryption. It is not a development-only tool.
 - Package metadata and its `LICENSE` file declare GNU GPL version 3. A verbatim copy of that file is in `licenses/libsignal-GPL-3.0.txt`.
-- Consequence for distribution: handing someone a *combined* work that includes libsignal (an npm tarball with dependencies bundled, a container image, a packaged binary) can carry GPLv3 conditions for that distribution, including offering corresponding source and keeping notices. Whether and how those conditions reach wabgpt's own MIT code in a particular combined artifact is **an open question that this project has not resolved and that needs a lawyer's review before anyone ships such an artifact**.
+- Consequence for distribution: handing someone a *combined* work that includes libsignal (an npm tarball with dependencies bundled, a container image, a packaged binary) can carry GPLv3 conditions for that distribution, including offering corresponding source and keeping notices. Whether and how those conditions reach warelay's own MIT code in a particular combined artifact is **an open question that this project has not resolved and that needs a lawyer's review before anyone ships such an artifact**.
 - Not the same as network use: merely running GPLv3 software as a service does not by itself trigger the AGPL-style network source-disclosure clause. This repository does not make a claim either way about other GPLv3 duties.
 - What this repository does: ships source only, keeps `"private": true` in `package.json` (so `npm publish` is refused), and does not publish container images or npm packages. Dependencies are fetched by the person who installs or builds. The `Dockerfile` copies the dependency tree's own license files and `licenses/` into the image; anyone who publishes a built image takes on the review above.
 
@@ -20,7 +20,7 @@ Copyright (c) 2025 Rajeh Taher/WhiskeySockets. Unofficial WhatsApp Web client, n
 
 ### Optional image-processing packages (sharp, libvips) — Apache-2.0 / LGPL-3.0-or-later
 
-`package-lock.json` records `sharp` (Apache-2.0) and platform-specific `@img/sharp-*` binaries. The `@img/sharp-libvips-*` binary packages are declared `LGPL-3.0-or-later`; some Windows/WASM variants are declared `Apache-2.0 AND LGPL-3.0-or-later`. They are marked optional in the lockfile and are pulled in through a Baileys peer-dependency entry. wabgpt does not process media. LGPL terms for those binaries apply to anyone who redistributes them; each package ships its own license text in `node_modules`.
+`package-lock.json` records `sharp` (Apache-2.0) and platform-specific `@img/sharp-*` binaries. The `@img/sharp-libvips-*` binary packages are declared `LGPL-3.0-or-later`; some Windows/WASM variants are declared `Apache-2.0 AND LGPL-3.0-or-later`. They are marked optional in the lockfile and are pulled in through a Baileys peer-dependency entry. warelay does not process media. LGPL terms for those binaries apply to anyone who redistributes them; each package ships its own license text in `node_modules`.
 
 ## Other runtime dependencies
 
@@ -44,14 +44,14 @@ Development-only packages (TypeScript, tsx, linkedom and their dependencies) are
 ## BrowserOS Neo — GNU AGPL-3.0 (separate program)
 
 - Source and license: <https://github.com/browseros-ai/BrowserOS> (AGPL-3.0, plus ungoogled-chromium and Chromium component licenses as that project documents).
-- wabgpt neither vendors, modifies nor copies BrowserOS. It talks to a BrowserOS Neo process over a loopback Streamable HTTP MCP connection.
+- warelay neither vendors, modifies nor copies BrowserOS. It talks to a BrowserOS Neo process over a loopback Streamable HTTP MCP connection.
 - `compose.yaml` references the official image `ghcr.io/browseros-ai/neo`, pinned by digest, which each user pulls directly from GitHub Container Registry. Nothing in this repository's Docker build or package contains BrowserOS binaries.
 - Whoever republishes a BrowserOS image, a modified build, or a bundle containing its binaries must follow upstream's license and source-offer requirements for that artifact. Pulling the official image from its publisher does not change upstream's terms.
 - It is our position, not a legal ruling, that a separate client talking to an AGPL program over a network protocol is a separate work. If your use differs (for example modifying BrowserOS or linking its code), review it yourself.
 
 ## Trademarks
 
-WhatsApp, ChatGPT, OpenAI, BrowserOS and Chromium are trademarks of their respective owners. wabgpt is unaffiliated with them.
+WhatsApp, ChatGPT, OpenAI, BrowserOS and Chromium are trademarks of their respective owners. warelay is unaffiliated with them.
 
 ## Items still needing a human decision
 

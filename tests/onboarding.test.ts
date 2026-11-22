@@ -20,7 +20,7 @@ function managed(endpoint: () => string, failures = 0): Partial<OnboardingDepend
     ensureBrowser: async () => {
       dependencies.starts++;
       if (remaining-- > 0) throw new Error('Docker is not running.');
-      return { endpoint: endpoint(), viewerUrl: 'http://127.0.0.1:41080/', containerName: 'wabgpt-test' };
+      return { endpoint: endpoint(), viewerUrl: 'http://127.0.0.1:41080/', containerName: 'warelay-test' };
     },
     openUrl: async () => {},
     saveEndpoint: setBrowserMcpUrl,

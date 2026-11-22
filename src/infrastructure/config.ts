@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdir, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { isLoopbackHost, parseLocalMcpEndpoint } from './loopback.js';
 
-export const defaultConfigPath = join(homedir(), '.wa-chatgpt', 'config.json');
+/** Default data directory name: `~/.warelay`, or the pre-rename `~/.wa-chatgpt` when only that one exists. */
+export function defaultDataDirName(home = homedir(), exists: (path: string) => boolean = existsSync): string {
+  return !exists(join(home, '.warelay')) && exists(join(home, '.wa-chatgpt')) ? '.wa-chatgpt' : '.warelay';
+}
+
+export const defaultConfigPath = join(homedir(), defaultDataDirName(), 'config.json');
 export const defaultServerHost = '127.0.0.1';
 export const defaultServerPort = 8788;
 
@@ -16,7 +22,7 @@ export interface LoadedConfig { path: string; browserMcpUrl: string; dataDir: st
 function parsePublicOrigin(value: string): string {
   const url = new URL(value);
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && isLoopbackHost(url.hostname))) throw new Error('publicOrigin must use HTTPS unless it is a loopback address');
-  if (url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('publicOrigin must be a bare origin like https://wabgpt.example.com');
+  if (url.username || url.password || url.search || url.hash || url.pathname !== '/') throw new Error('publicOrigin must be a bare origin like https://warelay.example.com');
   return url.origin;
 }
 
@@ -47,7 +53,7 @@ export async function loadConfig(path = defaultConfigPath): Promise<LoadedConfig
   catch (error) {
     if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
     await mkdir(dirname(configPath), { recursive: true, mode: 0o700 });
-    const defaults = { browserMcpUrl: 'http://127.0.0.1:9010/mcp', dataDir: '~/.wa-chatgpt' };
+    const defaults = { browserMcpUrl: 'http://127.0.0.1:9010/mcp', dataDir: `~/${defaultDataDirName()}` };
     try { await writeFile(configPath, JSON.stringify(defaults, null, 2) + '\n', { flag: 'wx', mode: 0o600 }); }
     catch (writeError) {
       if (!(writeError instanceof Error && 'code' in writeError && writeError.code === 'EEXIST')) throw writeError;

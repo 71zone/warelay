@@ -153,7 +153,7 @@ const png = (payload: string): string => Buffer.concat([Buffer.from([0x89, 0x50,
 
 interface Page { context: AssetContext; calls: { code: string; maxChars: number | undefined }[]; logs: string[]; directory: string }
 async function fakePage(answer: (code: string) => unknown): Promise<Page> {
-  const directory = await mkdtemp(join(tmpdir(), 'wabgpt-shots-'));
+  const directory = await mkdtemp(join(tmpdir(), 'warelay-shots-'));
   const calls: Page['calls'] = [];
   const logs: string[] = [];
   const context: AssetContext = { run: async (code, maxChars) => { calls.push({ code, maxChars }); return answer(code); }, pageId: 7, provider: 'ChatGPT', logger: message => { logs.push(message); }, media: createMediaStore(directory) };

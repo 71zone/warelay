@@ -1,15 +1,15 @@
-# wabgpt self-hosted single-user server.
+# warelay self-hosted single-user server.
 #
 #   docker compose pull browseros
-#   docker compose build wabgpt
+#   docker compose build warelay
 #   docker compose up -d --wait
 #
 # Published ports (both on the host loopback only):
-#   127.0.0.1:8788  wabgpt owner dashboard (login with the owner token)
+#   127.0.0.1:8788  warelay owner dashboard (login with the owner token)
 #   127.0.0.1:6080  BrowserOS Neo noVNC viewer (NO authentication)
 #
-# NOT published: BrowserOS MCP (9010). The wabgpt container joins the browseros
-# container's network namespace, so wabgpt reaches MCP at 127.0.0.1:9010
+# NOT published: BrowserOS MCP (9010). The warelay container joins the browseros
+# container's network namespace, so warelay reaches MCP at 127.0.0.1:9010
 # without Docker ever mapping that port to the host.
 #
 # Keep the "127.0.0.1:" prefix. Without it Docker publishes on every
@@ -17,7 +17,7 @@
 # noVNC viewer nor the MCP server asks for a password: whoever reaches them
 # controls a browser signed in to your accounts. Reach the ports over SSH or a
 # private VPN; see docs/guides/docker-compose.md.
-name: wabgpt
+name: warelay
 
 services:
   browseros:
@@ -32,15 +32,15 @@ services:
     stop_grace_period: 20s # time for Neo to flush cookies on shutdown
     restart: unless-stopped
     # The image defines its own HEALTHCHECK (neo-healthcheck); it is inherited
-    # unchanged and wabgpt waits on it below.
+    # unchanged and warelay waits on it below.
     ports:
-      - "127.0.0.1:8788:8788" # wabgpt dashboard (served by the wabgpt container)
+      - "127.0.0.1:8788:8788" # warelay dashboard (served by the warelay container)
       - "127.0.0.1:6080:6080" # noVNC viewer, unauthenticated: loopback only
     volumes:
       # Fresh, isolated, persistent profile: Linux Chromium cannot read cookies
       # from a macOS/Windows desktop profile, and this must never be that one.
       - browseros-data:/data
-      # Hosted mode disables automatic tab groups; wabgpt needs them.
+      # Hosted mode disables automatic tab groups; warelay needs them.
       - ./deploy/neo.toml:/etc/neo/neo.toml:ro
     environment:
       # Upstream's documented defaults, stated so they are visible here.
@@ -52,11 +52,11 @@ services:
       # host security (no seccomp/apparmor=unconfined, no privileged mode) to
       # change that. See docs/guides/docker-compose.md#browser-sandbox.
 
-  wabgpt:
+  warelay:
     build:
       context: .
       dockerfile: Dockerfile
-    image: wabgpt:local
+    image: warelay:local
     # Share browseros' network namespace: MCP stays 127.0.0.1:9010 inside it,
     # and the dashboard port published above is this container's 8788.
     network_mode: "service:browseros"
@@ -75,8 +75,8 @@ services:
       - no-new-privileges:true
     volumes:
       # WhatsApp credentials, routing state, owner token, lock file.
-      - wabgpt-data:/data
-      - ./deploy/config.json:/etc/wabgpt/config.json:ro
+      - warelay-data:/data
+      - ./deploy/config.json:/etc/warelay/config.json:ro
     healthcheck:
       # The login page is public and contains no private data.
       test:
@@ -91,4 +91,4 @@ services:
 
 volumes:
   browseros-data:
-  wabgpt-data:
+  warelay-data:

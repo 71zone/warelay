@@ -9,13 +9,13 @@ import { defaultConfigPath, loadConfig } from './infrastructure/config.js';
 import { RESTART_EXIT_CODE, isSupervised, sessionStartSeconds, superviseRestarts, wasRestarted } from './infrastructure/supervisor.js';
 import { completeOnboarding, createTerminalSetupIO, OnboardingCancelled, prepareOnboarding, type PreparedOnboarding } from './onboarding/index.js';
 
-const help = `wabgpt · WhatsApp ↔ ChatGPT bridge
+const help = `warelay · WhatsApp ↔ AI assistants (ChatGPT, Claude, Gemini)
 
 ${usage}
-  wabgpt                Terminal dashboard; the first run starts a short guided setup
-  wabgpt setup          Run the guided setup again (browser, ChatGPT, WhatsApp, first contact)
-  wabgpt serve          Headless owner web dashboard (single user, no terminal needed)
-  wabgpt token          Print the owner login token for the web dashboard
+  warelay                Terminal dashboard; the first run starts a short guided setup
+  warelay setup          Run the guided setup again (browser, ChatGPT, WhatsApp, first contact)
+  warelay serve          Headless owner web dashboard (single user, no terminal needed)
+  warelay token          Print the owner login token for the web dashboard
 Config: ${defaultConfigPath}
 
 Terminal dashboard keys:
@@ -23,7 +23,7 @@ L  Connect WhatsApp or show a pairing QR
 R  Resume enabled forwarding sessions
 P  Pause all forwarding
 A  Add an international phone number
-X  Restart wabgpt: finishes any in-progress reply, then relaunches and resumes by itself
+X  Restart warelay: finishes any in-progress reply, then relaunches and resumes by itself
 B  Check BrowserOS connectivity and the ChatGPT composer (not proof of login)
 G  Pick or clear the selected contact's ChatGPT project from a searchable list of your projects
 T  Set the selected contact's fixed chat lifetime: 90m, 12h, 3d or never (default 24h)
@@ -46,7 +46,7 @@ Up/Down move, Enter assigns, Tab switches to list keys (R refreshes, C
 selects "No project"), F5 or Ctrl-R refreshes anywhere, Esc cancels.
 A project used by another contact is shown but cannot be chosen. Use a
 separate project per contact, with project-only memory set in ChatGPT;
-wabgpt does not verify or change that setting. Changing a contact's
+warelay does not verify or change that setting. Changing a contact's
 project resets its next chat. The old chat is not moved, imported or
 deleted. Projects in ChatGPT:
 https://help.openai.com/en/articles/10169521-projects-in-chatgpt
@@ -59,12 +59,12 @@ chats get their lifetime clock started once when first upgraded. This is
 a ChatGPT web subscription, not per-token API billing; no token, cost or
 latency saving is promised.
 
-Server: "wabgpt serve" runs the same bridge headless with an owner-only
-web dashboard; sign in with the token from "wabgpt token". Optional config
+Server: "warelay serve" runs the same bridge headless with an owner-only
+web dashboard; sign in with the token from "warelay token". Optional config
 key "server": { "host": "127.0.0.1", "port": 8788, "tokenFile": "<path>",
 "publicOrigin": "https://..." }. It listens on loopback by default; reach it
 over an SSH tunnel or VPN. publicOrigin is only for a TLS reverse proxy you
-trust and must be HTTPS (or loopback). Only one wabgpt process may use a
+trust and must be HTTPS (or loopback). Only one warelay process may use a
 data directory at a time.
 `;
 
@@ -78,7 +78,7 @@ const interruptedExitCode = 130;
  * SIGTERM, SIGHUP) aborts it, releases the lock and exits quietly; completed steps stay saved.
  */
 async function runTerminal(configPath: string | undefined, force: boolean): Promise<void> {
-  if (!stdin.isTTY || !stdout.isTTY) throw new Error('wabgpt needs an interactive terminal. Run it directly in a terminal tab, use "wabgpt serve" for the web dashboard, or use --help for usage.');
+  if (!stdin.isTTY || !stdout.isTTY) throw new Error('warelay needs an interactive terminal. Run it directly in a terminal tab, use "warelay serve" for the web dashboard, or use --help for usage.');
   const config = await loadConfig(configPath);
   const cancellation = new AbortController();
   const { signal } = cancellation;
@@ -112,7 +112,7 @@ async function runTerminal(configPath: string | undefined, force: boolean): Prom
     if (outcome === 'restart') process.exitCode = RESTART_EXIT_CODE;
   } catch (error) {
     if (!signal.aborted && !(error instanceof OnboardingCancelled)) throw error;
-    stdout.write('\nSetup stopped. Your progress is saved; run "wabgpt" to continue.\n');
+    stdout.write('\nSetup stopped. Your progress is saved; run "warelay" to continue.\n');
     process.exitCode = interruptedExitCode;
   } finally { finishSetupIO(); }
 }
@@ -129,7 +129,7 @@ async function runServer(configPath: string | undefined): Promise<void> {
 }
 
 async function printToken(configPath: string | undefined): Promise<void> {
-  if (!stdin.isTTY || !stdout.isTTY) throw new Error('wabgpt token prints a login secret and only runs in an interactive terminal.');
+  if (!stdin.isTTY || !stdout.isTTY) throw new Error('warelay token prints a login secret and only runs in an interactive terminal.');
   const config = await loadConfig(configPath);
   stdout.write(`${await readOrCreateOwnerToken(config.server.tokenFile)}\n`);
 }

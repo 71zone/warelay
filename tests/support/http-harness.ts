@@ -142,7 +142,7 @@ export async function withServer(run: (harness: Harness) => Promise<void>, optio
       await server.close();
       await application.close();
     }
-  }, 'wabgpt-http-');
+  }, 'warelay-http-');
 }
 
 function openEvents(port: number, headers: Record<string, string | undefined>): Promise<EventStream> {

@@ -144,7 +144,7 @@ class FakeEngine {
 async function withEngine(run: (engine: FakeEngine, dataDir: string) => Promise<void>): Promise<void> {
   const engine = new FakeEngine();
   engine.images.add(managedBrowserImage);
-  try { await withDirectory(directory => run(engine, join(directory, 'data')), 'wabgpt-browser-'); }
+  try { await withDirectory(directory => run(engine, join(directory, 'data')), 'warelay-browser-'); }
   finally { await engine.stopAll(); }
 }
 
@@ -171,7 +171,7 @@ test('creates an owned loopback-only browser with its own profile volume and ret
     assert.equal(container?.privileged, false);
     assert.equal(container?.volume, names.volume);
     assert.equal(container?.startedWithSettings, true);
-    assert.equal(engine.volumes.get(names.volume)?.['io.wabgpt.scope'], names.scope);
+    assert.equal(engine.volumes.get(names.volume)?.['io.warelay.scope'], names.scope);
     assert.ok(engine.mutations.includes('pull'));
     assert.equal((await fetch(new URL('/system/ready', browser.endpoint))).status, 200);
   });
@@ -233,7 +233,7 @@ test('never touches a foreign container or volume that happens to share the name
 test('a container of another data directory is not claimed through a copied label set', async () => {
   await withEngine(async (engine, dataDir) => {
     const names = await managedBrowserNames(dataDir);
-    engine.containers.set(names.container, { labels: { 'io.wabgpt.owner': 'wabgpt', 'io.wabgpt.role': 'browser', 'io.wabgpt.scope': 'deadbeefcafe' }, running: false, privileged: false, publishHost: '127.0.0.1', viewerPort: 1, volume: '' });
+    engine.containers.set(names.container, { labels: { 'io.warelay.owner': 'warelay', 'io.warelay.role': 'browser', 'io.warelay.scope': 'deadbeefcafe' }, running: false, privileged: false, publishHost: '127.0.0.1', viewerPort: 1, volume: '' });
     assert.equal(await codeOf(ensureManagedBrowser(options(engine, dataDir))), 'foreign-container');
     assert.deepEqual(engine.mutations, []);
   });
@@ -257,7 +257,7 @@ test('a stopped owned container configured to publish beyond loopback is rejecte
   await withEngine(async (engine, dataDir) => {
     const names = await managedBrowserNames(dataDir);
     engine.containers.set(names.container, {
-      labels: { 'io.wabgpt.owner': 'wabgpt', 'io.wabgpt.role': 'browser', 'io.wabgpt.scope': names.scope },
+      labels: { 'io.warelay.owner': 'warelay', 'io.warelay.role': 'browser', 'io.warelay.scope': names.scope },
       running: false, privileged: false, publishHost: '127.0.0.1', configuredHost: '0.0.0.0', viewerPort: 1, volume: names.volume,
     });
     assert.equal(await codeOf(ensureManagedBrowser(options(engine, dataDir))), 'unsafe-container');
@@ -274,7 +274,7 @@ test('reports a missing Docker and a stopped engine as distinct, actionable fail
     engine.up = false;
     assert.equal(await codeOf(ensureManagedBrowser(options(engine, dataDir))), 'docker-unavailable');
     engine.up = true;
-    assert.equal((await ensureManagedBrowser(options(engine, dataDir))).containerName.startsWith('wabgpt-neo-'), true);
+    assert.equal((await ensureManagedBrowser(options(engine, dataDir))).containerName.startsWith('warelay-neo-'), true);
   });
 });
 

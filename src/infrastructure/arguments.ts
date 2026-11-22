@@ -2,9 +2,9 @@ export type CommandName = 'tui' | 'setup' | 'serve' | 'token' | 'help';
 export interface CommandLine { command: CommandName; config?: string }
 
 const commands = new Set(['setup', 'serve', 'token', 'help']);
-export const usage = 'Usage: wabgpt [setup | serve | token] [--config <path>]';
+export const usage = 'Usage: warelay [setup | serve | token] [--config <path>]';
 
-/** Parses `wabgpt [setup|serve|token|help] [--config <path>]`; `--help`/`-h` anywhere wins. */
+/** Parses `warelay [setup|serve|token|help] [--config <path>]`; `--help`/`-h` anywhere wins. */
 export function parseCommandLine(args: readonly string[]): CommandLine {
   let command: CommandName | undefined;
   let config: string | undefined;

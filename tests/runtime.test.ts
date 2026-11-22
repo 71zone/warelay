@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { access, mkdtemp, rm, stat, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openRuntime } from '../src/bootstrap.js';
@@ -25,10 +25,19 @@ test('the process lock is exclusive, never auto-removed, and released once', () 
   assert.equal(await exists(join(directory, 'bridge.lock')), false);
 }));
 
-test('a stale lock from a crashed process is left for the operator', () => withDirectory(async directory => {
-  await writeFile(join(directory, 'bridge.lock'), '999999');
-  await assert.rejects(acquireLock(directory), /remove .*bridge\.lock/);
-  assert.equal(await exists(join(directory, 'bridge.lock')), true);
+test('a lock left by a process that no longer exists is reclaimed', () => withDirectory(async directory => {
+  await writeFile(join(directory, 'bridge.lock'), '2147483646');
+  const release = await acquireLock(directory);
+  assert.equal(await readFile(join(directory, 'bridge.lock'), 'utf8'), String(process.pid));
+  await release();
+}));
+
+test('a lock whose owner is alive or unreadable is left for the operator', () => withDirectory(async directory => {
+  for (const owner of [String(process.ppid), 'garbage']) {
+    await writeFile(join(directory, 'bridge.lock'), owner);
+    await assert.rejects(acquireLock(directory), /remove .*bridge\.lock/);
+    assert.equal(await exists(join(directory, 'bridge.lock')), true);
+  }
 }));
 
 test('one runtime owns the data directory, restores the console on close and never starts providers on its own', () => withDirectory(async directory => {
@@ -110,6 +119,6 @@ test('command line accepts the TUI default, setup, serve, token, help and both c
 
 test('command line rejects malformed arguments', () => {
   for (const args of [['--config'], ['--config='], ['--config', 'a', '--config', 'b'], ['serve', 'token'], ['serve', 'extra'], ['--bogus'], ['--config', 'a', 'x']]) {
-    assert.throws(() => parseCommandLine(args), /Usage: wabgpt/, args.join(' '));
+    assert.throws(() => parseCommandLine(args), /Usage: warelay/, args.join(' '));
   }
 });

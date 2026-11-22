@@ -137,7 +137,7 @@ export async function startHttpServer({ application, settings, limits: overrides
     application.off('qr', onQr);
   };
 
-  const cookieName = (origin: RequestOrigin): string => (origin.secure ? '__Host-wabgpt_session' : 'wabgpt_session');
+  const cookieName = (origin: RequestOrigin): string => (origin.secure ? '__Host-warelay_session' : 'warelay_session');
   const cookieValue = (request: IncomingMessage, name: string): string | undefined => {
     for (const part of (request.headers.cookie ?? '').split(';')) {
       const index = part.indexOf('=');

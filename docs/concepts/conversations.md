@@ -6,7 +6,7 @@ description: How each contact maps to a saved ChatGPT conversation, how projects
 
 # Conversations, projects and lifetime
 
-wabgpt is built for one owner. Each enabled contact has its own saved ChatGPT conversation, and a reply uses the selected ChatGPT web model and that conversation's context. Two contacts never share one conversation. Setting a project and lifetime is done in the [terminal dashboard](../reference/terminal.md) (G and T keys) or the [HTTP API](../reference/http-api.md#routes); both are saved in `state.json` and survive restarts ([Local data](../reference/local-data.md)). Source: [`src/core/state.ts`](../../src/core/state.ts), [`src/core/duration.ts`](../../src/core/duration.ts), [`src/adapters/chatgpt/projects.ts`](../../src/adapters/chatgpt/projects.ts), [`src/adapters/chatgpt/references.ts`](../../src/adapters/chatgpt/references.ts).
+warelay is built for one owner. Each enabled contact has its own saved ChatGPT conversation, and a reply uses the selected ChatGPT web model and that conversation's context. Two contacts never share one conversation. Setting a project and lifetime is done in the [terminal dashboard](../reference/terminal.md) (G and T keys) or the [HTTP API](../reference/http-api.md#routes); both are saved in `state.json` and survive restarts ([Local data](../reference/local-data.md)). Source: [`src/core/state.ts`](../../src/core/state.ts), [`src/core/duration.ts`](../../src/core/duration.ts), [`src/adapters/chatgpt/projects.ts`](../../src/adapters/chatgpt/projects.ts), [`src/adapters/chatgpt/references.ts`](../../src/adapters/chatgpt/references.ts).
 
 ## Conversation ownership
 
@@ -17,7 +17,7 @@ The bridge saves a new ChatGPT conversation URL, with its start time, as soon as
 Each contact can be bound to a ChatGPT project, chosen by name from a live list (the picker details are in [Terminal dashboard](../reference/terminal.md#project-picker)). The stored value is the canonical `https://chatgpt.com/g/g-p-<32 hex>` reference; you never paste a URL.
 
 - **Ownership.** A project already used by another contact cannot be assigned; the store enforces this too. Use a separate project per contact.
-- **Memory is yours to set.** Set each project to project-only memory in ChatGPT. wabgpt cannot check or change project settings, memory or instructions and never creates projects. Setup only reminds you. See [Projects in ChatGPT](https://help.openai.com/en/articles/10169521-projects-in-chatgpt) for how project memory modes work and their limits: project-only chats can reference only conversations within the same project, your account and workspace must allow memory, and a mode change on an existing project can take a few hours to apply.
+- **Memory is yours to set.** Set each project to project-only memory in ChatGPT. warelay cannot check or change project settings, memory or instructions and never creates projects. Setup only reminds you. See [Projects in ChatGPT](https://help.openai.com/en/articles/10169521-projects-in-chatgpt) for how project memory modes work and their limits: project-only chats can reference only conversations within the same project, your account and workspace must allow memory, and a mode change on an existing project can take a few hours to apply.
 - **New chats start in the project.** With a project, a contact's new chat starts in that project, and the bridge stops before sending if ChatGPT cannot open the project or lands elsewhere.
 - **Changing resets the chat.** Changing or clearing a contact's project resets its saved conversation URL, so the next message starts a new chat in the new place. The old chat is not imported, moved or deleted; it stays in ChatGPT where it was. Setting the same project again changes nothing.
 - **Not while busy.** A project cannot be changed while that contact's message is being processed.
@@ -36,6 +36,6 @@ Each contact has a fixed conversation lifetime. The default is 24 hours; `never`
 - **Older conversations.** Conversations saved before this feature existed have no recorded start, so their clock starts once at the first load after upgrading; their history is preserved until that lifetime runs out.
 - **Changing a lifetime** applies to the current conversation too, measured from its original start.
 - **Thread only.** The lifetime limits only the active conversation thread. It does not limit context ChatGPT keeps or retrieves across a project.
-- **No cost promise.** ChatGPT web is a subscription, not per-token API billing, so shorter or longer lifetimes make no cost or token-cache promise, and no latency saving is guaranteed. wabgpt does not use the OpenAI API.
+- **No cost promise.** ChatGPT web is a subscription, not per-token API billing, so shorter or longer lifetimes make no cost or token-cache promise, and no latency saving is guaranteed. warelay does not use the OpenAI API.
 
 For terms and account-use caveats about driving ChatGPT web through a browser, read the [motivation and policy notice](motivation.md).

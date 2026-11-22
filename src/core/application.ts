@@ -201,7 +201,7 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
    * resolves only after the adapter has drained its cleanup.
    */
   listProjects(provider: ProviderId = this.primaryProvider(), signal?: AbortSignal): Promise<Project[]> {
-    if (this.closed) return Promise.reject(new Error('wabgpt is closing.'));
+    if (this.closed) return Promise.reject(new Error('warelay is closing.'));
     let catalog = this.catalogs.get(provider);
     if (!catalog) this.catalogs.set(provider, catalog = new SingleFlight<Project[]>());
     return catalog.join(async shared => (await this.assistant.listProjects(provider, shared)).map(project => ({ ...project })), signal);
@@ -229,7 +229,7 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
     this.closing ??= (async () => {
       this.closed = true; this.generation++; this.bridge.disarm();
       clearTimeout(this.healTimer);
-      for (const catalog of this.catalogs.values()) catalog.cancel(new Error('wabgpt is closing.'));
+      for (const catalog of this.catalogs.values()) catalog.cancel(new Error('warelay is closing.'));
       await this.resumeAttempt?.catch(() => undefined);
       await this.assistantAttempt?.catch(() => undefined);
       await Promise.all([...this.catalogs.values()].map(catalog => catalog.drained()));

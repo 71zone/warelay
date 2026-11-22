@@ -2,7 +2,7 @@
 okf_version: "0.2"
 ---
 
-# wabgpt documentation
+# warelay documentation
 
 Start with [installation and first-run setup](guides/getting-started.md). For the reason behind the project, read [Motivation and approach](concepts/motivation.md).
 

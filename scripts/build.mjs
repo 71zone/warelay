@@ -1,5 +1,5 @@
 // Compiles into a scratch directory and swaps it in only on success, so a failed
-// build never removes a working dist/ (the global `wabgpt` link points into it).
+// build never removes a working dist/ (the global `warelay` link points into it).
 import { spawnSync } from 'node:child_process';
 import { chmod, rename, rm, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';

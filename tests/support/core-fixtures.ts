@@ -35,7 +35,7 @@ export const opaqueReferences: AssistantReferencePolicy = (() => {
   };
 })();
 
-export async function withDirectory(run: (directory: string) => Promise<void>, prefix = 'wabgpt-core-'): Promise<void> {
+export async function withDirectory(run: (directory: string) => Promise<void>, prefix = 'warelay-core-'): Promise<void> {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   try { await run(directory); } finally { await rm(directory, { recursive: true, force: true }); }
 }

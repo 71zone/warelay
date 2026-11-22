@@ -40,7 +40,7 @@ export async function openMcp(endpoint: URL, signal?: AbortSignal): Promise<McpC
   ajv.addFormat('uint', { type: 'number', validate: value => Number.isSafeInteger(value) && value >= 0 });
   ajv.addFormat('uint32', { type: 'number', validate: value => Number.isInteger(value) && value >= 0 && value <= 0xffff_ffff });
   ajv.addFormat('uint64', { type: 'number', validate: value => Number.isSafeInteger(value) && value >= 0 });
-  const client = new Client({ name: 'whatsapp-chatgpt-bridge', version: '1.0.0' }, { jsonSchemaValidator: new AjvJsonSchemaValidator(ajv) });
+  const client = new Client({ name: 'warelay', version: '1.0.0' }, { jsonSchemaValidator: new AjvJsonSchemaValidator(ajv) });
   try {
     await client.connect(new StreamableHTTPClientTransport(endpoint), { timeout: 10000, signal });
     const { tools } = await client.listTools(undefined, { signal });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadConfig, setBrowserMcpUrl } from '../src/infrastructure/config.js';
+import { defaultDataDirName, loadConfig, setBrowserMcpUrl } from '../src/infrastructure/config.js';
 import { parseLocalMcpEndpoint } from '../src/infrastructure/loopback.js';
 
 async function withDirectory(run: (directory: string) => Promise<void>): Promise<void> {
@@ -100,4 +100,12 @@ test('parseLocalMcpEndpoint accepts only credential-free loopback HTTP(S) URLs',
   for (const value of ['', 'nonsense', 'ftp://127.0.0.1/mcp', 'http://0.0.0.0:9010/mcp', 'http://10.0.0.5/mcp', 'http://user@127.0.0.1/mcp', 'http://:pw@localhost/mcp']) {
     assert.throws(() => parseLocalMcpEndpoint(value), Error, value);
   }
+});
+
+test('default data directory is ~/.warelay unless only the pre-rename ~/.wa-chatgpt exists', () => {
+  const only = (...names: string[]) => (path: string) => names.some(name => path === join('/h', name));
+  assert.equal(defaultDataDirName('/h', only()), '.warelay');
+  assert.equal(defaultDataDirName('/h', only('.wa-chatgpt')), '.wa-chatgpt');
+  assert.equal(defaultDataDirName('/h', only('.warelay')), '.warelay');
+  assert.equal(defaultDataDirName('/h', only('.warelay', '.wa-chatgpt')), '.warelay');
 });

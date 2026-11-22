@@ -1,12 +1,12 @@
 ---
 type: Reference
 title: Owner dashboard and HTTP API
-description: Authentication, security rules, routes, state shape and event stream of the owner web dashboard served by wabgpt serve.
+description: Authentication, security rules, routes, state shape and event stream of the owner web dashboard served by warelay serve.
 ---
 
 # Owner dashboard and HTTP API
 
-`wabgpt serve` runs the same bridge as the [terminal dashboard](terminal.md), headless, with a web dashboard for one trusted owner. It is not a multi-user service and has had no independent security audit. Keep it on loopback or a private network. To run it, see [Server](../guides/server.md) and, for the container stack, [Docker Compose](../guides/docker-compose.md). Server settings (`host`, `port`, `tokenFile`, `publicOrigin`) are documented in [Configuration](configuration.md#the-server-block).
+`warelay serve` runs the same bridge as the [terminal dashboard](terminal.md), headless, with a web dashboard for one trusted owner. It is not a multi-user service and has had no independent security audit. Keep it on loopback or a private network. To run it, see [Server](../guides/server.md) and, for the container stack, [Docker Compose](../guides/docker-compose.md). Server settings (`host`, `port`, `tokenFile`, `publicOrigin`) are documented in [Configuration](configuration.md#the-server-block).
 
 Code: [`src/interfaces/http/`](../../src/interfaces/http/) ([`server.ts`](../../src/interfaces/http/server.ts) routes and event streams, [`auth.ts`](../../src/interfaces/http/auth.ts) token file, sessions and login limiter, [`policy.ts`](../../src/interfaces/http/policy.ts) Host/Origin rules and headers, [`view.ts`](../../src/interfaces/http/view.ts) response shaping). Static assets: [`web/index.html`](../../web/index.html), [`web/app.js`](../../web/app.js), [`web/app.css`](../../web/app.css) (plain JavaScript, no build step).
 
@@ -19,9 +19,9 @@ readOrCreateOwnerToken(path: string): Promise<string>
 
 ## Signing in
 
-The owner token is 32 random bytes (base64url) in `server.tokenFile` (default `<dataDir>/server-token`, mode 0600, parent created 0700, created exclusively). Print it on a terminal with `wabgpt token`. The server never logs it, never serves it and never accepts it in a URL, header or cookie other than the one JSON `POST /api/login` body. The web page keeps nothing in `localStorage`; the session is an `HttpOnly` cookie and the CSRF token lives only in page memory.
+The owner token is 32 random bytes (base64url) in `server.tokenFile` (default `<dataDir>/server-token`, mode 0600, parent created 0700, created exclusively). Print it on a terminal with `warelay token`. The server never logs it, never serves it and never accepts it in a URL, header or cookie other than the one JSON `POST /api/login` body. The web page keeps nothing in `localStorage`; the session is an `HttpOnly` cookie and the CSRF token lives only in page memory.
 
-Smoke test with curl (run `wabgpt token --config /path/config.json` separately in an interactive terminal, then paste its output at `read`; command substitution is deliberately refused). Every POST needs `Origin`, `Content-Type: application/json`, and mutations need the CSRF token:
+Smoke test with curl (run `warelay token --config /path/config.json` separately in an interactive terminal, then paste its output at `read`; command substitution is deliberately refused). Every POST needs `Origin`, `Content-Type: application/json`, and mutations need the CSRF token:
 
 ```sh
 umask 077
@@ -44,8 +44,8 @@ To rotate the token, see [Maintenance](../runbooks/maintenance.md).
 
 - Listens on `server.host` (default `127.0.0.1`, port 8788). The container image binds `0.0.0.0` inside its own network namespace and publishes only a loopback host port. BrowserOS/MCP, noVNC and this API must not be internet-facing.
 - **Host allow list.** `localhost`, `127.0.0.1` and `[::1]` on any port (so SSH forwards and remapped ports work), the specific bind address when `host` is not a wildcard, and the host of `publicOrigin`. Anything else gets `421`. Protects against DNS rebinding.
-- **Public origin.** For a TLS reverse proxy set `server.publicOrigin` to the exact external origin (`https://wabgpt.example.com`). The proxy must forward the original `Host` header. Requests for that host use cookie `__Host-wabgpt_session` with `Secure`, and `Origin` must equal `publicOrigin`. `X-Forwarded-*` headers are ignored.
-- **Sessions.** Random 256-bit ids, only a hash is kept server-side. Absolute 12 hour lifetime, at most 8 sessions (oldest revoked first). Cookie `wabgpt_session` (loopback) or `__Host-wabgpt_session` (public HTTPS): `HttpOnly; SameSite=Strict; Path=/; Max-Age`. Logout, expiry, eviction and re-login revoke the session and close its event streams.
+- **Public origin.** For a TLS reverse proxy set `server.publicOrigin` to the exact external origin (`https://warelay.example.com`). The proxy must forward the original `Host` header. Requests for that host use cookie `__Host-warelay_session` with `Secure`, and `Origin` must equal `publicOrigin`. `X-Forwarded-*` headers are ignored.
+- **Sessions.** Random 256-bit ids, only a hash is kept server-side. Absolute 12 hour lifetime, at most 8 sessions (oldest revoked first). Cookie `warelay_session` (loopback) or `__Host-warelay_session` (public HTTPS): `HttpOnly; SameSite=Strict; Path=/; Max-Age`. Logout, expiry, eviction and re-login revoke the session and close its event streams.
 - **CSRF.** Every mutation is `POST`, requires `Content-Type: application/json`, a same-origin `Origin` header and `X-CSRF-Token` equal to the session's token (compared in constant time). No GET changes state.
 - **Reads and streams.** A request with a foreign `Origin` or `Sec-Fetch-Site` other than `same-origin`/`none` is refused with `403`. No CORS headers are sent.
 - **Limits.** Login body 4 KiB, other bodies 8 KiB (`413`), 30 s request timeout, strict JSON schemas (unknown fields `400`), 5 failed logins per remote address per minute and 50 per minute overall (`429` with `Retry-After`, applied before the token is checked), 4 event streams per session and 16 overall, 200 activity entries.
@@ -109,4 +109,4 @@ Stable ids for scripted checks: login `#login`, `#login-form`, `#login-token`, `
 
 ## Remote access
 
-Preferred: keep `127.0.0.1` and use `ssh -L 8788:127.0.0.1:8788 host` or a VPN, then open `http://localhost:8788`. For a TLS reverse proxy, set `"server": { "publicOrigin": "https://wabgpt.example.com" }`, forward `Host` unchanged and restrict the proxy to the owner (VPN, mTLS or an authenticating proxy in addition to the owner token). Do not publish the BrowserOS MCP or noVNC ports. Exposure table and HTTPS proxy steps for the container stack: [Docker Compose](../guides/docker-compose.md).
+Preferred: keep `127.0.0.1` and use `ssh -L 8788:127.0.0.1:8788 host` or a VPN, then open `http://localhost:8788`. For a TLS reverse proxy, set `"server": { "publicOrigin": "https://warelay.example.com" }`, forward `Host` unchanged and restrict the proxy to the owner (VPN, mTLS or an authenticating proxy in addition to the owner token). Do not publish the BrowserOS MCP or noVNC ports. Exposure table and HTTPS proxy steps for the container stack: [Docker Compose](../guides/docker-compose.md).

@@ -26,7 +26,7 @@ const clockTime = (time: number): string => new Date(time).toLocaleTimeString([]
  */
 export async function runTui(application: Application, options: { canRestart?: boolean } = {}): Promise<'quit' | 'restart'> {
   const { channelName, configPath } = application.metadata;
-  const screen = blessed.screen({ smartCSR: true, fullUnicode: true, title: 'wabgpt', dockBorders: true, warnings: false });
+  const screen = blessed.screen({ smartCSR: true, fullUnicode: true, title: 'warelay', dockBorders: true, warnings: false });
   const done = Promise.withResolvers<void>();
   let outcome: 'quit' | 'restart' = 'quit';
   const frame = { type: 'line' } satisfies blessed.Widgets.Border;
@@ -148,8 +148,8 @@ export async function runTui(application: Application, options: { canRestart?: b
     return rows[directoryIndex];
   }
   function renderHeader(): void {
-    if (Number(screen.width) < 90 || Number(screen.height) < 34) header.setContent('{yellow-fg}wabgpt · Enlarge this terminal to at least 90 × 34 for the full dashboard.{/}');
-    else header.setContent(`{cyan-fg}{bold}wabgpt{/bold}{/cyan-fg}  ${clean(channelName)} → ${clean(application.assistantName())} → ${clean(channelName)}\nSaved contacts. One conversation per forwarding session.\n${application.snapshot().contacts.length} contacts · ${application.snapshot().routes.filter(route => route.enabled).length} enabled · Config: ${clean(configPath)}`);
+    if (Number(screen.width) < 90 || Number(screen.height) < 34) header.setContent('{yellow-fg}warelay · Enlarge this terminal to at least 90 × 34 for the full dashboard.{/}');
+    else header.setContent(`{cyan-fg}{bold}warelay{/bold}{/cyan-fg}  ${clean(channelName)} → ${clean(application.assistantName())} → ${clean(channelName)}\nSaved contacts. One conversation per forwarding session.\n${application.snapshot().contacts.length} contacts · ${application.snapshot().routes.filter(route => route.enabled).length} enabled · Config: ${clean(configPath)}`);
   }
   function refreshDetails(): void {
     const data = application.snapshot();

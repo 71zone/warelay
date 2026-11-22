@@ -11,7 +11,7 @@ export const nativeEndpoint = 'http://127.0.0.1:9010/mcp';
 
 /** A real config file in a temporary directory with its own data directory, loaded through the real loader. */
 export async function withConfig(run: (config: LoadedConfig, directory: string) => Promise<void>, endpoint = nativeEndpoint): Promise<void> {
-  const directory = await mkdtemp(join(tmpdir(), 'wabgpt-onboarding-'));
+  const directory = await mkdtemp(join(tmpdir(), 'warelay-onboarding-'));
   try {
     await mkdir(join(directory, 'data'), { recursive: true });
     const path = join(directory, 'config.json');

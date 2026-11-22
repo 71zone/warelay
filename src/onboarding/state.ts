@@ -48,11 +48,11 @@ export async function readSetupState(dataDir: string): Promise<SetupState | null
   catch (error) { if (isMissing(error)) return null; throw error; }
   let raw: unknown;
   try { raw = JSON.parse(text); }
-  catch { throw new Error(`Setup progress file ${path} is not valid JSON. Fix or remove it, then run wabgpt again.`); }
+  catch { throw new Error(`Setup progress file ${path} is not valid JSON. Fix or remove it, then run warelay again.`); }
   const version = typeof raw === 'object' && raw !== null && 'version' in raw ? raw.version : undefined;
-  if (typeof version === 'number' && version > CURRENT_VERSION) throw new Error(`Setup progress file ${path} was written by a newer wabgpt (version ${version}). Update wabgpt or remove the file.`);
+  if (typeof version === 'number' && version > CURRENT_VERSION) throw new Error(`Setup progress file ${path} was written by a newer warelay (version ${version}). Update warelay or remove the file.`);
   const parsed = setupSchema.safeParse(raw);
-  if (!parsed.success) throw new Error(`Setup progress file ${path} is invalid: ${parsed.error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ')}. Fix or remove it, then run wabgpt again.`);
+  if (!parsed.success) throw new Error(`Setup progress file ${path} is invalid: ${parsed.error.issues.map(issue => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ')}. Fix or remove it, then run warelay again.`);
   return parsed.data;
 }
 

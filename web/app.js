@@ -1,5 +1,5 @@
 'use strict';
-/* wabgpt owner dashboard. Plain browser JavaScript, no build step. All server text is inserted with textContent only.
+/* warelay owner dashboard. Plain browser JavaScript, no build step. All server text is inserted with textContent only.
  * The owner token is never stored; the session cookie is HttpOnly and the CSRF token lives only in this variable. */
 (() => {
   const $ = id => document.getElementById(id);

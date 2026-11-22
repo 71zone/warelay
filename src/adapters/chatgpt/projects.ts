@@ -78,8 +78,8 @@ export function mergeProjects(rows: { id: string; name: string }[]): Project[] {
     const name = row.name.replace(/\s+/g, ' ').trim();
     let ref: string;
     try { ref = normalizeProjectUrl(`https://chatgpt.com/g/${row.id}`); }
-    catch { throw new Error(`ChatGPT's project list contains an entry with an unrecognised id (${JSON.stringify(row.id)}). Update wabgpt before choosing a project.`); }
-    if (!name) throw new Error('ChatGPT\'s project list contains a project without a readable name. Update wabgpt before choosing a project.');
+    catch { throw new Error(`ChatGPT's project list contains an entry with an unrecognised id (${JSON.stringify(row.id)}). Update warelay before choosing a project.`); }
+    if (!name) throw new Error('ChatGPT\'s project list contains a project without a readable name. Update warelay before choosing a project.');
     if (!byRef.has(ref)) byRef.set(ref, { name, ref });
   }
   return [...byRef.values()].sort((a, b) => collator.compare(a.name, b.name) || (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
@@ -132,7 +132,7 @@ async function readSidebar(run: CatalogRun, pageId: number, warn: Logger, signal
       last = sidebarSchema.parse(await evaluate(run, pageId, projectSidebarScript, 'read', false, signal));
       if (last.loginRequired) throw new Error(signedOut);
       if (last.challenge) throw new Error(challenged);
-      if (!last.sectionKnown) throw new Error('Could not locate the Projects section of the ChatGPT sidebar. ChatGPT\'s layout may have changed; update wabgpt.');
+      if (!last.sectionKnown) throw new Error('Could not locate the Projects section of the ChatGPT sidebar. ChatGPT\'s layout may have changed; update warelay.');
       if (last.header && !last.header.expanded) {
         // Collapsed sections render no rows. Expand in this scratch tab only; the finally below restores it.
         if (!expandedByUs) { expandedByUs = true; await evaluate(run, pageId, projectSidebarScript, 'toggle', true, signal); }

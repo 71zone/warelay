@@ -1,12 +1,14 @@
 {
-  "name": "whatsapp-chatgpt-bridge",
+  "name": "warelay",
   "version": "1.0.0",
-  "description": "Self-hosted single-user bridge that forwards WhatsApp chats to ChatGPT through a local BrowserOS Neo browser, with a terminal dashboard and an owner web dashboard.",
+  "description": "Self-hosted single-user relay that forwards WhatsApp chats to AI assistants (ChatGPT, Claude and Gemini) through a local BrowserOS Neo browser, with a terminal dashboard and an owner web dashboard.",
   "license": "MIT",
-  "author": "wabgpt contributors",
+  "author": "warelay contributors",
   "keywords": [
     "whatsapp",
     "chatgpt",
+    "claude",
+    "gemini",
     "browseros",
     "mcp",
     "self-hosted"
@@ -22,7 +24,7 @@
     }
   },
   "bin": {
-    "wabgpt": "dist/cli.js"
+    "warelay": "dist/cli.js"
   },
   "files": [
     "dist",

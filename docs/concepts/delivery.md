@@ -1,7 +1,7 @@
 ---
 type: Concept
 title: Delivery behavior
-description: What wabgpt forwards, how it avoids duplicates, why failed messages are never replayed, and how read receipts and reconnects work.
+description: What warelay forwards, how it avoids duplicates, why failed messages are never replayed, and how read receipts and reconnects work.
 ---
 
 # Delivery behavior

@@ -6,7 +6,7 @@ import type { RoutingState } from '../src/core/state.js';
 import { fakeAssistant, fakeChannel, loadState, opaqueReferences, projectA, projectB, providerNames, withDirectory } from './support/core-fixtures.js';
 
 async function fixture(run: (store: RoutingState, directory: string) => Promise<void>, now?: () => number): Promise<void> {
-  await withDirectory(async directory => { await run(await loadState(directory, now), directory); }, 'wabgpt-bridge-');
+  await withDirectory(async directory => { await run(await loadState(directory, now), directory); }, 'warelay-bridge-');
 }
 const bridgeOf = (store: RoutingState, assistant: Assistant, channel: MessagingAdapter, logger: (message: string) => void = () => {}): Bridge => new Bridge(store, assistant, channel, logger, providerNames);
 const alice = { id: '11111111111@s.whatsapp.net', name: 'Alice' };

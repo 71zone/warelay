@@ -6,7 +6,7 @@ description: Install the bundled single-user server stack, understand what it ex
 
 # Docker Compose stack
 
-This guide runs wabgpt as a **single-user** server with Docker Compose: one WhatsApp account, one ChatGPT account, one owner. It is not a multi-tenant or public service, and nothing here makes it one. If you only want the terminal dashboard on your own computer you do not need this guide: install `wabgpt` and its first-run setup can start a managed Docker browser for you (see [Managed Docker browser](managed-browser.md)).
+This guide runs warelay as a **single-user** server with Docker Compose: one WhatsApp account, one ChatGPT account, one owner. It is not a multi-tenant or public service, and nothing here makes it one. If you only want the terminal dashboard on your own computer you do not need this guide: install `warelay` and its first-run setup can start a managed Docker browser for you (see [Managed Docker browser](managed-browser.md)).
 
 Operating it afterwards (start, stop, logs, updates, backups, token rotation, reset) is in [maintenance](../runbooks/maintenance.md); problems are in [troubleshooting](../runbooks/troubleshooting.md).
 
@@ -17,7 +17,7 @@ Two containers are involved in the default (bundled) setup. [Getting started](ge
 | Service | Image | Role |
 | --- | --- | --- |
 | `browseros` | Official `ghcr.io/browseros-ai/neo`, pinned by digest, pulled from its publisher | BrowserOS Neo on a virtual display, with its MCP server and a noVNC viewer |
-| `wabgpt` | Built from this repository's `Dockerfile` | WhatsApp connection, routing and the owner dashboard |
+| `warelay` | Built from this repository's `Dockerfile` | WhatsApp connection, routing and the owner dashboard |
 
 BrowserOS Neo is AGPL-3.0 software that this repository neither copies nor modifies. Compose downloads the official image directly from GitHub Container Registry; see [THIRD_PARTY_NOTICES.md](../../THIRD_PARTY_NOTICES.md).
 
@@ -25,16 +25,16 @@ BrowserOS Neo is AGPL-3.0 software that this repository neither copies nor modif
 
 | Port | Served by | Published on the host? | Authentication |
 | --- | --- | --- | --- |
-| 8788 | wabgpt owner dashboard | `127.0.0.1` only | Owner token, then a server-side session cookie |
+| 8788 | warelay owner dashboard | `127.0.0.1` only | Owner token, then a server-side session cookie |
 | 6080 | BrowserOS noVNC viewer | `127.0.0.1` only | **None** |
 | 9010 | BrowserOS MCP (and its local API) | **Not published at all** | **None** |
 
 - Docker publishes ports only on the host's loopback address. Remote access is an SSH tunnel or a private VPN, not an open port.
-- The `wabgpt` container joins the `browseros` container's network namespace (`network_mode: service:browseros`). wabgpt therefore reaches MCP at `127.0.0.1:9010` inside that shared namespace, and Docker never maps 9010 to the host. The dashboard on 8788 is wabgpt's listener inside the same namespace, published through the `browseros` service.
+- The `warelay` container joins the `browseros` container's network namespace (`network_mode: service:browseros`). warelay therefore reaches MCP at `127.0.0.1:9010` inside that shared namespace, and Docker never maps 9010 to the host. The dashboard on 8788 is warelay's listener inside the same namespace, published through the `browseros` service.
 - Keep the `127.0.0.1:` prefix on the `ports:` entries in [`compose.yaml`](../../compose.yaml). Without it Docker publishes on every interface and, on Linux, bypasses firewalls such as `ufw`.
 - noVNC gives full mouse and keyboard control of a browser that is signed in to your ChatGPT account. MCP lets a caller drive that browser and run scripts in it. Never put either behind a public port, and never proxy them without your own authentication layer.
 - No application environment variables are needed. The bundled configuration, `deploy/config.json`, sets `dataDir` to `/data` and listens on `0.0.0.0` inside the shared container network namespace; Compose publishes the dashboard on the host's `127.0.0.1` only. The host-browser override uses `deploy/config.host-browser.json`, which binds the dashboard directly to `127.0.0.1` instead. Both files are secret-free. See [configuration](../reference/configuration.md).
-- The statement that MCP is never published describes this Compose stack. The one deliberate exception is the [managed browser](managed-browser.md#ports) that the native `wabgpt` command starts for itself, published on `127.0.0.1` only, on random host ports. Neither Compose file does that.
+- The statement that MCP is never published describes this Compose stack. The one deliberate exception is the [managed browser](managed-browser.md#ports) that the native `warelay` command starts for itself, published on `127.0.0.1` only, on random host ports. Neither Compose file does that.
 
 See also [SECURITY.md](../../SECURITY.md).
 
@@ -51,16 +51,16 @@ Get the repository onto the server (clone it from wherever you obtained it, or c
 
 ```sh
 docker compose pull browseros        # official BrowserOS Neo image, digest-pinned
-docker compose build wabgpt          # builds this repository's app image
+docker compose build warelay          # builds this repository's app image
 docker compose up -d --wait          # starts both; waits for health checks
 docker compose ps
 ```
 
-`--wait` returns once `browseros` reports healthy (its own image-defined health check, which allows a start period of about 90 seconds) and wabgpt's dashboard answers on its loopback health probe.
+`--wait` returns once `browseros` reports healthy (its own image-defined health check, which allows a start period of about 90 seconds) and warelay's dashboard answers on its loopback health probe.
 
 Nothing is forwarded after installation. A fresh install has no contacts enabled, no WhatsApp link and no ChatGPT login.
 
-The first run creates, inside the `wabgpt-data` volume: `server-token` (owner token, mode 0600), `state.json`, `bridge.lock` and a `whatsapp/` directory with WhatsApp credentials after you link an account. If the volume starts from state written by an older release (schema version 1, for example a restored backup), the first save keeps that file as `state.json.v1.bak` beside the new `state.json`; it is private but as sensitive as the state itself. The `browseros-data` volume holds the BrowserOS profile. See [local data](../reference/local-data.md).
+The first run creates, inside the `warelay-data` volume: `server-token` (owner token, mode 0600), `state.json`, `bridge.lock` and a `whatsapp/` directory with WhatsApp credentials after you link an account. If the volume starts from state written by an older release (schema version 1, for example a restored backup), the first save keeps that file as `state.json.v1.bak` beside the new `state.json`; it is private but as sensitive as the state itself. The `browseros-data` volume holds the BrowserOS profile. See [local data](../reference/local-data.md).
 
 ## Reach the dashboard and viewer
 
@@ -84,7 +84,7 @@ Open the dashboard through the same hostname you tunneled (`127.0.0.1` or `local
 The token is created on first use and stored in `/data/server-token`. Print it on the server, in an interactive terminal:
 
 ```sh
-docker compose exec wabgpt wabgpt token --config /etc/wabgpt/config.json
+docker compose exec warelay warelay token --config /etc/warelay/config.json
 ```
 
 The command refuses to print into a non-interactive pipe (do not pass `-T` or pipe it), never writes the token to logs and never puts it in a URL. Paste it into the dashboard's login form. Treat it like a password: whoever holds it can pair your WhatsApp account and enable forwarding. To rotate it, see [maintenance](../runbooks/maintenance.md); every existing session ends.
@@ -93,7 +93,7 @@ Anyone who can run `docker` on the host is effectively root there and can read b
 
 ## First-time setup (human steps)
 
-These steps need a person. wabgpt does not log in for you, solve CAPTCHAs, or bypass Cloudflare or OpenAI challenges.
+These steps need a person. warelay does not log in for you, solve CAPTCHAs, or bypass Cloudflare or OpenAI challenges.
 
 ### Sign in to ChatGPT through noVNC
 
@@ -111,7 +111,7 @@ The profile lives in the `browseros-data` volume, so the login survives restarts
 
 ### Open the dashboard and check the browser
 
-Log in with the owner token and run the browser check. It verifies that wabgpt can reach the BrowserOS MCP server and that a ChatGPT message composer is available, without sending a prompt. A signed-out ChatGPT page can still show a composer, so the check alone does not prove you are signed in. Refresh the project list as well: it reports "ChatGPT is signed out in BrowserOS" until the remote browser is actually signed in.
+Log in with the owner token and run the browser check. It verifies that warelay can reach the BrowserOS MCP server and that a ChatGPT message composer is available, without sending a prompt. A signed-out ChatGPT page can still show a composer, so the check alone does not prove you are signed in. Refresh the project list as well: it reports "ChatGPT is signed out in BrowserOS" until the remote browser is actually signed in.
 
 ### Link WhatsApp in the owner dashboard
 
@@ -134,7 +134,7 @@ For access without an SSH tunnel you may put a TLS reverse proxy that you contro
   "host": "0.0.0.0",
   "port": 8788,
   "tokenFile": "/data/server-token",
-  "publicOrigin": "https://wabgpt.example.com"
+  "publicOrigin": "https://warelay.example.com"
 }
 ```
 

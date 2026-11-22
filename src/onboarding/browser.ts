@@ -1,6 +1,6 @@
 // Managed BrowserOS Neo in Docker, for the terminal onboarding.
 //
-// One container and one data volume per wabgpt data directory, both named from a hash of that
+// One container and one data volume per warelay data directory, both named from a hash of that
 // directory and carrying ownership labels. This helper never touches a container or volume it
 // does not own, never deletes a profile, and never opens pages or prompts: it only makes the
 // browser reachable. MCP (9010) and the noVNC viewer (6080) are published on 127.0.0.1 with
@@ -21,10 +21,10 @@ export const managedBrowserImage = 'ghcr.io/browseros-ai/neo@sha256:6b8939714b29
 const MCP_PORT = 9010;
 const VIEWER_PORT = 6080;
 const LOOPBACK = '127.0.0.1';
-const OWNER_LABEL = 'io.wabgpt.owner';
-const SCOPE_LABEL = 'io.wabgpt.scope';
-const ROLE_LABEL = 'io.wabgpt.role';
-const OWNER = 'wabgpt';
+const OWNER_LABEL = 'io.warelay.owner';
+const SCOPE_LABEL = 'io.warelay.scope';
+const ROLE_LABEL = 'io.warelay.role';
+const OWNER = 'warelay';
 const ROLE = 'browser';
 const DEFAULT_READY_TIMEOUT_MS = 120_000;
 const DEFAULT_POLL_MS = 1000;
@@ -99,7 +99,7 @@ export async function managedBrowserNames(dataDir: string): Promise<{ scope: str
   const absolute = resolve(dataDir);
   const canonical = await realpath(absolute).catch(() => absolute);
   const scope = createHash('sha256').update(canonical).digest('hex').slice(0, 12);
-  return { scope, container: `wabgpt-neo-${scope}`, volume: `wabgpt-neo-${scope}-data` };
+  return { scope, container: `warelay-neo-${scope}`, volume: `warelay-neo-${scope}-data` };
 }
 
 const portBinding = z.object({ HostIp: z.string(), HostPort: z.string() });
@@ -129,7 +129,7 @@ function assertLoopbackOnly(bindings: Record<string, readonly { HostIp: string }
   for (const [container, list] of Object.entries(bindings)) {
     for (const binding of list ?? []) {
       if (binding.HostIp !== LOOPBACK && binding.HostIp !== '::1') {
-        throw new ManagedBrowserError('unsafe-container', `The managed browser ${verb} ${container} on ${binding.HostIp || 'all interfaces'}, not loopback only. Remove the container and let wabgpt recreate it (the saved profile volume is kept).`);
+        throw new ManagedBrowserError('unsafe-container', `The managed browser ${verb} ${container} on ${binding.HostIp || 'all interfaces'}, not loopback only. Remove the container and let warelay recreate it (the saved profile volume is kept).`);
       }
     }
   }
@@ -155,12 +155,12 @@ function isOwned(labels: Record<string, string> | null | undefined, scope: strin
 function assertSafe(inspected: Inspected, name: string): void {
   const { Privileged, NetworkMode, PidMode, PortBindings } = inspected.HostConfig;
   if (Privileged || NetworkMode === 'host' || PidMode === 'host') {
-    throw new ManagedBrowserError('unsafe-container', `Container ${name} is privileged or shares host namespaces. Remove it and let wabgpt recreate it (the saved profile volume is kept).`);
+    throw new ManagedBrowserError('unsafe-container', `Container ${name} is privileged or shares host namespaces. Remove it and let warelay recreate it (the saved profile volume is kept).`);
   }
   // Checked before any start: starting a container configured for 0.0.0.0 would expose MCP before we could reject it.
   assertLoopbackOnly(PortBindings ?? {}, 'is configured to publish');
   for (const port of [MCP_PORT, VIEWER_PORT]) {
-    if (!(PortBindings?.[`${port}/tcp`] ?? []).some(binding => binding.HostIp === LOOPBACK)) throw new ManagedBrowserError('invalid-ports', `Container ${name} is not configured to publish port ${port} on ${LOOPBACK}. Remove it and let wabgpt recreate it (the saved profile volume is kept).`);
+    if (!(PortBindings?.[`${port}/tcp`] ?? []).some(binding => binding.HostIp === LOOPBACK)) throw new ManagedBrowserError('invalid-ports', `Container ${name} is not configured to publish port ${port} on ${LOOPBACK}. Remove it and let warelay recreate it (the saved profile volume is kept).`);
   }
 }
 
@@ -170,7 +170,7 @@ async function neoAsset(): Promise<string> {
     if (!(await stat(path)).isFile()) throw new Error('not a file');
     return await realpath(path);
   } catch {
-    throw new ManagedBrowserError('asset-missing', `The shipped BrowserOS settings file is missing (${path}). Reinstall wabgpt.`);
+    throw new ManagedBrowserError('asset-missing', `The shipped BrowserOS settings file is missing (${path}). Reinstall warelay.`);
   }
 }
 
@@ -208,7 +208,7 @@ async function ensureVolume(runner: DockerRunner, signal: AbortSignal, volume: s
     let labels: unknown;
     try { labels = JSON.parse(raw); } catch { labels = null; }
     const parsed = z.record(z.string(), z.string()).nullable().safeParse(labels);
-    if (!parsed.success || !isOwned(parsed.data, scope)) throw new ManagedBrowserError('foreign-volume', `A Docker volume named ${volume} exists but was not created by wabgpt. Rename or remove it, then retry.`);
+    if (!parsed.success || !isOwned(parsed.data, scope)) throw new ManagedBrowserError('foreign-volume', `A Docker volume named ${volume} exists but was not created by warelay. Rename or remove it, then retry.`);
     return;
   }
   await docker(runner, signal, ['volume', 'create', '--label', `${OWNER_LABEL}=${OWNER}`, '--label', `${ROLE_LABEL}=${ROLE}`, '--label', `${SCOPE_LABEL}=${scope}`, volume]);
@@ -260,7 +260,7 @@ async function discardNewContainer(runner: DockerRunner, name: string): Promise<
  * location usually is not). Copying the `neo` directory into `/etc` also creates `/etc/neo` when absent.
  */
 async function copySettings(runner: DockerRunner, signal: AbortSignal, name: string, asset: string): Promise<void> {
-  const staging = await mkdtemp(join(tmpdir(), 'wabgpt-neo-'));
+  const staging = await mkdtemp(join(tmpdir(), 'warelay-neo-'));
   try {
     const folder = join(staging, 'neo');
     await mkdir(folder, { mode: 0o755 });
@@ -339,7 +339,7 @@ export async function ensureManagedBrowser(options: ManagedBrowserOptions): Prom
   const present = (await listNames(runner, signal, ['container', 'ls', '--all', '--filter', `name=^/${names.container}$`, '--format', '{{.Names}}'])).includes(names.container);
   if (present) {
     const existing = await inspectContainer(runner, signal, names.container);
-    if (!isOwned(existing.Config.Labels, names.scope)) throw new ManagedBrowserError('foreign-container', `A Docker container named ${names.container} exists but was not created by wabgpt. Rename or remove it, then retry.`);
+    if (!isOwned(existing.Config.Labels, names.scope)) throw new ManagedBrowserError('foreign-container', `A Docker container named ${names.container} exists but was not created by warelay. Rename or remove it, then retry.`);
     assertSafe(existing, names.container);
     if (!existing.State.Running) {
       log('Starting your BrowserOS container…');
