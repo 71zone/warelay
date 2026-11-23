@@ -19,6 +19,12 @@ export type ReplyBlock =
    * messaging adapters deliver those instead of the header and rows, which remain as the text form for adapters that cannot show images.
    */
   | { type: 'table'; header: string[]; rows: string[][]; images?: Attachment[] }
+  /**
+   * An interactive card that is not a table (a step strip with icons, a flashcard with buttons). `text` is its readable content without icons, buttons and counters,
+   * Markdown lines. `images`, when not empty, are pictures of it as the assistant displayed it; messaging adapters deliver those and nothing else, unless `companion`
+   * is set (the picture mostly shows controls, such as a flashcard), in which case `text` follows the pictures as its own copyable message. Without images `text` is delivered alone.
+   */
+  | { type: 'widget'; text: string; companion: boolean; images?: Attachment[] }
   | { type: 'attachment'; attachment: Attachment };
 export interface IncomingMessage {
   id: string;

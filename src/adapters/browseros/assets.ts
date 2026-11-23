@@ -142,31 +142,25 @@ async function fetchAsset(asset: Extraction['assets'][number], context: AssetCon
 /**
  * Turns an extraction into deliverable blocks: every `asset` placeholder is fetched into the media store and becomes an `attachment` block at its place.
  * An asset that cannot be fetched (or is over the size or count limits) stays visible as a `(could not retrieve <name>)` note and the rest is kept.
- * A big table (see isBigTable) and every card of rows is screenshotted as the provider drew it and keeps the pictures in `images`; when that fails, or the reply
- * has more than MAX_REPLY_SHOTS of them, the table stays as it was and is delivered as text.
+ * A big table (see isBigTable), every card of rows and every widget is screenshotted as the provider drew it and keeps the pictures in `images`; when that fails,
+ * or the reply has more than MAX_REPLY_SHOTS of them, the block stays as it was and is delivered as text.
+ * The pictures are taken last, from the bottom of the reply upwards: ChatGPT drops the rendered turn (and the stamps on it) once the page has been scrolled to the top
+ * of a long reply and then back down, which cost every picture after the first, while scrolling up from the end leaves it in place.
  */
 export async function resolveBlocks(extracted: Extraction, context: AssetContext): Promise<ReplyBlock[]> {
   const assets = new Map(extracted.assets.map(asset => [asset.id, asset]));
   const shots = new Map(extracted.shots.map(shot => [shot.block, shot]));
   const blocks: ReplyBlock[] = [];
+  const pictures: { at: number; id: number; block: Extract<ReplyBlock, { type: 'table' | 'widget' }> }[] = [];
   let attempted = 0;
-  let pictured = 0;
   for (const [index, block] of extracted.blocks.entries()) {
-    if (block.type === 'table') {
+    if (block.type === 'table' || block.type === 'widget') {
       const shot = shots.get(index);
-      if (!shot || (shot.kind === 'table' && !isBigTable(block.header, block.rows))) { blocks.push(block); continue; }
-      if (pictured >= MAX_REPLY_SHOTS) {
-        context.logger(`Not picturing a table: ${context.provider} returned more than ${MAX_REPLY_SHOTS} big tables in one reply; it is sent as text.`);
-        blocks.push(block);
-        continue;
+      if (shot && (block.type === 'widget' || shot.kind === 'card' || isBigTable(block.header, block.rows))) {
+        if (pictures.length < MAX_REPLY_SHOTS) pictures.push({ at: blocks.length, id: shot.id, block });
+        else context.logger(`Not picturing a ${block.type}: ${context.provider} returned more than ${MAX_REPLY_SHOTS} big tables or widgets in one reply; it is sent as text.`);
       }
-      pictured++;
-      try {
-        blocks.push({ ...block, images: await captureShot(shot.id, context) });
-      } catch (error) {
-        context.logger(`Could not take a picture of a table in ${context.provider}'s reply (${error instanceof Error ? error.message : String(error)}); it is sent as text.`);
-        blocks.push(block);
-      }
+      blocks.push(block);
       continue;
     }
     if (block.type !== 'asset') { blocks.push(block); continue; }
@@ -185,6 +179,13 @@ export async function resolveBlocks(extracted: Extraction, context: AssetContext
       blocks.push({ type: 'markdown', text: `(could not retrieve ${asset.name})` });
     } finally {
       await context.run(inPage(context, releaseScript, asset.id)).catch(() => undefined);
+    }
+  }
+  for (const { at, id, block } of pictures.reverse()) {
+    try {
+      blocks[at] = { ...block, images: await captureShot(id, context, block.type) };
+    } catch (error) {
+      context.logger(`Could not take a picture of a ${block.type} in ${context.provider}'s reply (${error instanceof Error ? error.message : String(error)}); it is sent as text.`);
     }
   }
   return blocks;

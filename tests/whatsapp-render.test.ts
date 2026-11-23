@@ -151,6 +151,15 @@ test('an email draft arrives as a label bubble, a bubble with only the subject a
   assert.ok(long.length > 3 && long.slice(2).every(message => message.kind === 'text' && message.text.length <= 4000));
 });
 
+test('a widget is its pictures, plus its text as a copyable message when the pictures mostly show controls, and its text alone when there is no picture', () => {
+  const image: Attachment = { kind: 'image', path: '/tmp/w.png', fileName: 'widget.png', mimeType: 'image/png' };
+  const lines = '**Monitor:** Identify KPI gaps.\n**Analyze:** Segment data.';
+  assert.deepEqual(planReply([{ type: 'widget', text: lines, companion: false, images: [image] }]), [{ kind: 'media', attachment: image }]);
+  assert.deepEqual(planReply([{ type: 'widget', text: 'How would you deliver?', companion: true, images: [image] }]), [{ kind: 'media', attachment: image }, { kind: 'text', text: 'How would you deliver?' }]);
+  assert.deepEqual(planReply([{ type: 'widget', text: lines, companion: false }]), [{ kind: 'text', text: '*Monitor:* Identify KPI gaps.\n*Analyze:* Segment data.' }]);
+  assert.deepEqual(planReply([{ type: 'widget', text: '', companion: true }]), []);
+});
+
 test('long prose splits on paragraph, line and word boundaries within 4000 characters', () => {
   const paragraphs = Array.from({ length: 10 }, (_, index) => `${index}`.repeat(900));
   const chunks = splitText(paragraphs.join('\n\n'));

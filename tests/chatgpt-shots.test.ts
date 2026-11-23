@@ -200,8 +200,8 @@ test('a big table gets pictures, a card always does, and a small table is never 
     assert.deepEqual(blocks.map(block => block.type === 'table' ? block.images?.length ?? 0 : -1), [-1, 1, 0, 1]);
     assert.deepEqual(blocks[1]?.type === 'table' && { header: blocks[1].header, rows: blocks[1].rows }, { header: comparison.header, rows: comparison.rows });
     assert.equal(page.calls.length, 2);
-    assert.ok(page.calls[0]?.code.includes('const measured=(await page.evaluateInPage(') && page.calls[0].code.includes(',1)'), 'the first picture is of element 1');
-    assert.ok(page.calls[1]?.code.includes(',3)'), 'the second picture is of element 3, the small table in between is skipped');
+    assert.ok(page.calls[0]?.code.includes('const measured=(await page.evaluateInPage(') && page.calls[0].code.includes(',3)'), 'the pictures are taken from the bottom of the reply upwards, so the card comes first');
+    assert.ok(page.calls[1]?.code.includes(',1)'), 'then the big table above it; the small table in between is skipped');
   } finally { await rm(page.directory, { recursive: true, force: true }); }
 });
 
@@ -247,5 +247,66 @@ test('shots follow their block when a missing asset placeholder before the table
     const blocks = await resolveBlocks(extractionOf([{ type: 'asset', id: 9 }, comparison], [{ id: 1, kind: 'table', block: 1 }]), page.context);
     assert.equal(blocks.length, 1);
     assert.equal(blocks[0]?.type === 'table' && blocks[0].images?.length, 1);
+  } finally { await rm(page.directory, { recursive: true, force: true }); }
+});
+
+// --- widgets: a step strip with icons and a flashcard with buttons, as ChatGPT drew them in the "KPI Interview Strategy" conversation ---
+
+const icon = '<svg data-d-component="icon"></svg>';
+const step = (number: number, label: string): string => dil('grid-item', dil('box', `${dil('box', icon)}${text(String(number))}${text(label)}`), ' data-d-direction="col"');
+const stepLine = (label: string, rest: string): string => `<p data-d-component="text"><span data-d-component="text"><span data-d-component="text"><strong>${label}:</strong></span> ${rest}</span></p>`;
+const strip = (steps: [string, string][]): string => dil('box', `${dil('grid', steps.map(([label], index) => step(index + 1, label)).join(''))}${dil('divider', '')}${steps.map(([label, rest]) => stepLine(label, rest)).join('')}`, ' data-d-direction="col" data-d-has-border=""');
+const flashcard = (question: string, after = ''): string => dil('box', [
+  dil('row', `${text('INTERVIEW PRACTICE')}${text('<span>4</span> <span>of</span> <span>4</span>')}`),
+  `<h2 data-d-component="title"><strong>${question}</strong></h2>`,
+  dil('row', `<button type="button" data-d-component="button"><span>Show sample answer</span></button>${dil('row', `<button type="button">${icon}</button><button type="button" aria-disabled="true">${icon}</button>`)}`),
+  after,
+].join(''), ' data-d-direction="col" data-d-has-border=""');
+const steps: [string, string][] = [['Monitor', 'Identify KPI gaps and trends.'], ['Analyze', 'Segment data to determine root causes.'], ['Act', 'Assign corrective actions to Team Leaders.']];
+const question = 'The client requests a 10% productivity increase without additional headcount. How would you deliver?';
+
+test('a step strip is a widget: stamped, listed, and read as its plain lines without the repeated icon labels or numbers', () => {
+  const { result, document } = extract(`${text('Memorize this:')}${strip(steps)}${text('Next')}`);
+  assert.deepEqual(result.blocks, [
+    { type: 'markdown', text: 'Memorize this:' },
+    { type: 'widget', text: '**Monitor:** Identify KPI gaps and trends.\n**Analyze:** Segment data to determine root causes.\n**Act:** Assign corrective actions to Team Leaders.', companion: false },
+    { type: 'markdown', text: 'Next' },
+  ]);
+  assert.deepEqual(result.shots, [{ id: 1, kind: 'widget', block: 1 }]);
+  assert.equal(document.querySelector('[data-wab-shot="1"]')?.getAttribute('data-d-component'), 'box');
+});
+
+test('a flashcard is a widget whose text is the question alone, without the label, counter and buttons, and it asks for a text companion', () => {
+  const { result } = extract(flashcard(question));
+  assert.deepEqual(result.blocks, [{ type: 'widget', text: question, companion: true }]);
+  assert.deepEqual(result.shots, [{ id: 1, kind: 'widget', block: 0 }]);
+});
+
+test('text that follows the question is the answer, labelled by the button that toggles it', () => {
+  const { result } = extract(flashcard(question, text('Start from the baseline.') + text('Then assign owners.')).replace('Show sample answer', 'Hide sample answer'));
+  assert.deepEqual(result.blocks, [{ type: 'widget', text: `${question}\n**Sample answer**\nStart from the baseline.\nThen assign owners.`, companion: true }]);
+});
+
+test('a bordered box without buttons or icons stays prose, and one with a code block keeps its code block', () => {
+  const plain = extract(dil('box', text('Just a note'), ' data-d-has-border=""'));
+  assert.deepEqual(plain.result.shots, []);
+  assert.deepEqual(plain.result.blocks, [{ type: 'markdown', text: 'Just a note' }]);
+  const code = extract(dil('box', `<pre><code>run()</code></pre><button type="button">Copy</button>`, ' data-d-has-border=""'));
+  assert.deepEqual(code.result.blocks.map(block => block.type), ['code']);
+});
+
+const strip3 = { type: 'widget' as const, text: '**Monitor:** Identify', companion: false };
+const flash = { type: 'widget' as const, text: question, companion: true };
+/** The stamped element a capture script was built for: the argument of its first in-page call. */
+const shotOf = (code: string): string | undefined => /\},(\d+)\)\)\.value;\s*if\(measured\.error\)/.exec(code)?.[1];
+
+test('widgets are pictured like cards, bottom to top, and keep their text when the picture fails', async () => {
+  const page = await fakePage(code => shotOf(code) === '3' ? { error: 'Something is drawn over the table.' } : { images: [png('widget')] });
+  try {
+    const blocks = await resolveBlocks(extractionOf([strip3, { type: 'markdown', text: 'between' }, flash, strip3], [{ id: 1, kind: 'widget', block: 0 }, { id: 2, kind: 'widget', block: 2 }, { id: 3, kind: 'widget', block: 3 }]), page.context);
+    assert.deepEqual(blocks.map(block => block.type === 'widget' ? block.images?.length ?? 0 : -1), [1, -1, 1, 0]);
+    assert.deepEqual(page.calls.map(call => shotOf(call.code)), ['3', '2', '1']);
+    assert.match(page.logs[0] ?? '', /Could not take a picture of a widget.*sent as text/);
+    assert.equal(blocks[0]?.type === 'widget' && blocks[0].images?.[0]?.fileName, 'widget.png');
   } finally { await rm(page.directory, { recursive: true, force: true }); }
 });

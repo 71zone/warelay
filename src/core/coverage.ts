@@ -9,6 +9,7 @@ function textOf(block: ReplyBlock): string {
     case 'draft': return `${block.title ?? ''} ${block.text}`;
     case 'code': return block.code;
     case 'table': return [block.header, ...block.rows].flat().join(' ');
+    case 'widget': return block.text;
     case 'attachment': return '';
   }
 }

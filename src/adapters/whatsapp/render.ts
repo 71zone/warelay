@@ -231,6 +231,15 @@ function planTable(block: Extract<ReplyBlock, { type: "table" }>): PlannedMessag
   return planned;
 }
 
+/** A widget with pictures is sent as those images, followed by its text as a message of its own when the pictures mostly show controls; without pictures its text is sent alone. */
+function planWidget(block: Extract<ReplyBlock, { type: "widget" }>): PlannedMessage[] {
+  const pictures: PlannedMessage[] = (block.images ?? []).map(attachment => ({ kind: "media", attachment }));
+  if (pictures.length && !block.companion) return pictures;
+  const text = block.text.replace(/\r\n?/g, "\n").trim();
+  const lines: PlannedMessage[] = text ? splitText(markdownToWhatsApp(text)).map(part => ({ kind: "text", text: part }) satisfies PlannedMessage) : [];
+  return [...pictures, ...lines];
+}
+
 /** A draft is plain WhatsApp-formatted text in messages of its own, so long-press copy yields the draft alone. A subject gets an italic label bubble and its own bubble. */
 function planDraft(block: Extract<ReplyBlock, { type: "draft" }>): PlannedMessage[] {
   const planned: PlannedMessage[] = [];
@@ -258,6 +267,7 @@ export function planReply(blocks: ReplyBlock[]): PlannedMessage[] {
     if (block.type === "code") planned.push(...planCode(block));
     else if (block.type === "table") planned.push(...planTable(block));
     else if (block.type === "draft") planned.push(...planDraft(block));
+    else if (block.type === "widget") planned.push(...planWidget(block));
     else planned.push({ kind: "media", attachment: block.attachment });
   }
   flushProse();

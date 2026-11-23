@@ -26,6 +26,10 @@ export { extraction, type Extraction } from '../browseros/extraction.js';
  * - A card of rows (the STAR framework: a letter, a bold title and a description per row) is a `[data-d-component="box"][data-d-has-border]` whose direct
  *   children are `[data-d-component="row"]` (each holding two boxes: the letter, then the text) separated by dividers; it has no table markup. A table sits in
  *   a `[data-d-component="table"]` frame that can be much wider than the table itself, so the screenshot targets the `table` element.
+ * - A widget is any other bordered box that holds a button or an icon (`svg[data-d-component="icon"]`): a step strip (a `grid` of icon, number and label per
+ *   `grid-item`, a divider, then one `Label: description` paragraph per step) or a flashcard (a `row` with a small-caps label and an "N of M" counter, a `title` heading
+ *   with the question, and a `row` of "Show sample answer" and previous/next buttons). Only the visible slide of a flashcard exists in the page, and the answer
+ *   only appears after its button is pressed, which the reader never does. The widget is stamped for a screenshot and read as clean text lines.
  */
 export const chatgptExtractionScript = String.raw`(targetUserId) => {
   ${locateAssistant}
@@ -177,7 +181,45 @@ export const chatgptExtractionScript = String.raw`(targetUserId) => {
     return rows.length ? { type: 'table', header: [], rows } : null;
   };
 
-  // The reader stamps each table or card it returns with data-wab-shot="<id>" and lists it in result.shots (kind and the index of its block), so the adapter
+  // Any other bordered box with a button or an icon is a widget (see the header comment): pictured as drawn, with its readable content kept as text. The box of a
+  // generated file or a draft is not one, and neither is a box that holds code or a writing card, which have their own blocks.
+  const isWidget = (el) => el.matches('[data-d-component="box"][data-d-has-border]') && !isRowCard(el) && !el.querySelector(CARD + ',' + CODE)
+    && !!el.querySelector('button:not([aria-label="Download file"]),svg[data-d-component="icon"]');
+  const COUNTER = /^\d+\s*(?:of|\/)\s*\d+$/i;
+  const widgetBlock = (box) => {
+    const skipped = (el) => { for (let node = el; node && node !== box; node = node.parentElement) if (node.matches(SKIP)) return true; return false; };
+    const within = (el, selector) => { const found = el.closest(selector); return found && found !== box && box.contains(found) ? found : null; };
+    const lines = [];
+    for (const unit of box.querySelectorAll('p,li,' + HEADINGS.join(','))) {
+      if (unit.querySelector('p,li,' + HEADINGS.join(',')) || skipped(unit)) continue;
+      const text = paragraph(Array.from(unit.childNodes), !HEADINGS.includes(tagOf(unit)));
+      if (text) lines.push({ text, item: within(unit, '[data-d-component="grid-item"]'), row: within(unit, '[data-d-component="row"]') });
+    }
+    // A pager ("4 of 4") and the label beside it are chrome of the carousel, not content.
+    const pagerRows = new Set(lines.filter(line => COUNTER.test(line.text) && line.row).map(line => line.row));
+    const entries = [];
+    for (const line of lines) {
+      if (COUNTER.test(line.text) || (line.row && pagerRows.has(line.row))) continue;
+      const last = entries[entries.length - 1];
+      if (line.item && last && last.item === line.item) last.text += ' ' + line.text;
+      else entries.push({ text: line.text, item: line.item, grid: line.item ? within(line.item, '[data-d-component="grid"]') : null });
+    }
+    // A strip of numbered labels (icon, "1", "Monitor") is dropped when the lines below it start with the same labels ("Monitor: ...").
+    const flat = (text) => text.replace(/\*/g, '').toLowerCase();
+    const bare = (entry) => flat(entry.text).replace(/^\d+\s*[.)]?\s*/, '').trim();
+    const redundant = (grid) => {
+      const strip = entries.filter(entry => entry.grid === grid);
+      return strip.every(entry => bare(entry) && entries.some(other => !other.grid && flat(other.text).startsWith(bare(entry) + ':')));
+    };
+    const kept = entries.filter(entry => !entry.grid || !redundant(entry.grid));
+    // A button that toggles an answer ("Show sample answer") says what the text after the question is: the answer, labelled.
+    const toggle = Array.from(box.querySelectorAll('button')).map(button => /^(?:show|hide|reveal)\s+(.+)$/i.exec(collapse(button.textContent).trim())).find(Boolean);
+    const texts = kept.map(entry => entry.text);
+    if (toggle && texts.length > 1) texts.splice(1, 0, '**' + toggle[1].charAt(0).toUpperCase() + toggle[1].slice(1) + '**');
+    return { type: 'widget', text: texts.join('\n'), companion: !!box.querySelector('button:not([aria-label="Download file"])') };
+  };
+
+  // The reader stamps each table, card or widget it returns with data-wab-shot="<id>" and lists it in result.shots (kind and the index of its block), so the adapter
   // can screenshot the element that ChatGPT drew when the table is too big for text.
   let nextShot = 0;
   const addShot = (el, kind) => {
@@ -217,7 +259,7 @@ export const chatgptExtractionScript = String.raw`(targetUserId) => {
     for (const node of parent.childNodes) {
       if (node.nodeType === 3) { run.push(node); continue; }
       if (node.nodeType !== 1 || node.matches(SKIP)) continue;
-      if (node.matches(BLOCKS) || isRowCard(node)) { endRun(); out.push({ el: node }); }
+      if (node.matches(BLOCKS) || isRowCard(node) || isWidget(node)) { endRun(); out.push({ el: node }); }
       else if (hasBlock(node)) { endRun(); out.push(...itemsOf(node)); }
       else if (LINES.test(tagOf(node))) { endRun(); run.push(node); endRun(); }
       else run.push(node);
@@ -298,6 +340,7 @@ export const chatgptExtractionScript = String.raw`(targetUserId) => {
     if (el.matches(CARD)) { addCard(el); return; }
     if (el.matches(CODE)) { const block = codeBlock(el); if (block.code.trim()) addBlock(block); return; }
     if (isRowCard(el)) { const block = cardBlock(el); if (block) { addBlock(block); addShot(el, 'card'); } return; }
+    if (isWidget(el)) { addBlock(widgetBlock(el)); addShot(el, 'widget'); return; }
     if (tag === 'table') { const block = tableBlock(el); if (block) { addBlock(block); addShot(el, 'table'); } return; }
     if (tag === 'hr') addMarkdown('---');
     else if (tag === 'ul' || tag === 'ol') addList(el);
