@@ -219,3 +219,46 @@ test('the composer script counts attachment tiles and the ones still uploading',
   assert.deepEqual(state(''), { tiles: 0, uploading: 0, error: null });
   assert.deepEqual(state(`<div data-composer-attachments>${tile('a.png', false)}${tile('b.png', true)}</div>`), { tiles: 2, uploading: 1, error: null });
 });
+
+// A reply that mixes ChatGPT's "box" widgets as captured live: a card of titled rows (letter, bold title, description, divider), a box of labelled
+// paragraphs, and an input form (labels, textareas and a disabled call-to-action button). The prose around them is ordinary DIL markup.
+const dil = (component: string, inner: string): string => `<div data-d-component="${component}">${inner}</div>`;
+const cardRow = (letter: string, title: string, body: string): string => dil('row', `${dil('box', `<h1 data-d-component="title"><strong>${letter}</strong></h1>`)}${dil('box', `<p data-d-component="text"><span data-d-component="text"><strong>${title}</strong></span></p><p data-d-component="text">${body}</p>`)}`);
+const formField = (label: string): string => dil('box', `<label data-d-component="label">${label}</label><div data-w-component="" data-variant="outline"><textarea data-d-component="textarea" placeholder="Example: something to type" rows="2"></textarea></div>`);
+const formWidget = (labels: string[]): string => dil('box', `${labels.map(formField).join('')}<button type="button" disabled="" data-d-component="button"><span><span>Create my answer</span></span></button>`);
+
+test('card rows, labelled boxes and input forms read as separate readable lines instead of running together', () => {
+  const reply = [
+    text('Intro'),
+    dil('box', [cardRow('S', 'Situation — 15%', 'What was the problem?'), dil('divider', ''), cardRow('T', 'Task — 10%', 'What were you responsible for?')].join('')),
+    dil('box', `${text('S — SITUATION')}${text('"We missed our targets."')}${text('T — TASK')}${text('"Fix quality without pressure."')}`),
+    formWidget(['Situation — What problem did you face?', 'Task — What was your responsibility?']),
+    text('Outro'),
+  ].join('');
+  const [block] = parse(run(textTurn(reply), chatgptExtractionScript)).blocks;
+  assert.deepEqual(block, {
+    type: 'markdown',
+    text: [
+      'Intro',
+      '# S',
+      '**Situation — 15%**\n\nWhat was the problem?',
+      '# T',
+      '**Task — 10%**\n\nWhat were you responsible for?',
+      'S — SITUATION',
+      '"We missed our targets."',
+      'T — TASK',
+      '"Fix quality without pressure."',
+      'Situation — What problem did you face?\nTask — What was your responsibility?',
+      'Outro',
+    ].join('\n\n'),
+  });
+});
+
+test('an app shell that keeps earlier pages mounted is read from the active page, not from the first main on the document', () => {
+  const stale = '<main id="stale"><div data-app-shell-active-page="false"></div></main>';
+  const earlier = `<div data-app-shell-active-page="false"><main id="earlier">${textTurn(text('Old page'), '').replace(/<\/?main>/g, '')}</main></div>`;
+  const active = `<div data-app-shell-active-page="true">${textTurn(text('Active page'))}</div>`;
+  const result = inspected.parse(run(`${stale}${earlier}${active}`, chatgptInspectionScript));
+  assert.equal(result.text, 'Active page');
+  assert.equal(parse(run(`${stale}${earlier}${active}`, chatgptExtractionScript)).blocks[0]?.type, 'markdown');
+});
