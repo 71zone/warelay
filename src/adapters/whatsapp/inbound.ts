@@ -9,7 +9,7 @@ import type { DirectorySaver } from "./autosave.js";
 import type { LinkState } from "./connection.js";
 import type { Directory } from "./directory.js";
 import type { DirectoryIngest } from "./ingestion.js";
-import { describeError, extractImage, extractText, imageExtension, isOneToOneUserJid, messageSeconds } from "./protocol.js";
+import { describeError, extractImage, extractText, imageExtension, isOneToOneUserJid, messageSeconds, withQuote } from "./protocol.js";
 import type { ImageContent } from "./protocol.js";
 
 export interface Inbound {
@@ -94,12 +94,12 @@ export function createInbound(options: InboundOptions): Inbound {
     if (image) {
       const attachments = await downloadPhoto(message, id, contact.name, image);
       if (!attachments) return;
-      onMessage({ id, contact, text: image.caption, attachments, acknowledge: receiptFor({ ...message.key, id, remoteJid }) });
+      onMessage({ id, contact, text: withQuote(message, image.caption), attachments, acknowledge: receiptFor({ ...message.key, id, remoteJid }) });
       return;
     }
     const text = extractText(message);
     if (text === undefined) return;
-    onMessage({ id, contact, text, attachments: [], acknowledge: receiptFor({ ...message.key, id, remoteJid }) });
+    onMessage({ id, contact, text: withQuote(message, text), attachments: [], acknowledge: receiptFor({ ...message.key, id, remoteJid }) });
   }
 
   /** Saves the photo under the media store; returns undefined (after logging why) when it must not be forwarded. */

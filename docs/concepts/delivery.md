@@ -16,6 +16,8 @@ Only incoming direct text and extended-text messages are forwarded. Groups, stat
 
 Messages are processed serially. The bridge saves each message ID in a delivery journal before submitting it, so duplicate events are not resent after restart. The journal and sessions live in `state.json` and hold no message or reply bodies ([Local data](../reference/local-data.md)). Replies use the selected ChatGPT web model and the existing conversation's context.
 
+When the contact answers with WhatsApp's reply feature (swipe or long-press, then Reply), the prompt starts with `Replying to this earlier message:` followed by the quoted text as a `>` block (cut at 2000 characters; a quoted photo or voice note appears as `[photo]` or `[voice message]`), then the contact's own text. Without that, the assistant would only see the short answer and not what it refers to.
+
 ## Read receipts
 
 After the new prompt appears in its saved ChatGPT conversation, the bridge marks the original WhatsApp message as read. It does not wait for the assistant's response to finish and does not mark failed or unconfirmed submissions as read. This uses WhatsApp's normal read-receipt API and respects your account's read-receipt privacy setting. Receipt delivery runs independently: a slow or failed receipt does not delay the WhatsApp reply. Failures are reported in Activity without resending the prompt.

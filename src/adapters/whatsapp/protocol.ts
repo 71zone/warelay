@@ -85,3 +85,28 @@ export function imageExtension(mimeType: string): string {
   const known = IMAGE_EXTENSIONS[mimeType.toLowerCase().split(";")[0]?.trim() ?? ""];
   return known ?? "img";
 }
+
+/** Longest quoted passage forwarded with a reply; the rest is cut so one long quote cannot swamp the prompt. */
+const QUOTE_MAX_CHARS = 2000;
+
+/** The message this one replies to (WhatsApp quote), as plain text; "[photo]" and similar when the quoted message carried no text. */
+export function extractQuote(message: WAMessage): string | undefined {
+  const content = normalizeMessageContent(message.message);
+  if (!content) return undefined;
+  const context = content.extendedTextMessage?.contextInfo ?? content.imageMessage?.contextInfo ?? content.documentMessage?.contextInfo ?? undefined;
+  const quoted = normalizeMessageContent(context?.quotedMessage);
+  if (!quoted) return undefined;
+  const text = quoted.conversation ?? quoted.extendedTextMessage?.text ?? quoted.imageMessage?.caption ?? quoted.documentMessage?.caption ?? quoted.videoMessage?.caption;
+  const label = quoted.imageMessage ? "[photo]" : quoted.videoMessage ? "[video]" : quoted.audioMessage ? "[voice message]" : quoted.documentMessage ? "[document]" : quoted.stickerMessage ? "[sticker]" : undefined;
+  const body = nonEmpty(text) ?? label;
+  if (!body) return undefined;
+  return body.length > QUOTE_MAX_CHARS ? `${body.slice(0, QUOTE_MAX_CHARS)}…` : body;
+}
+
+/** Prepends the quoted message to `text` so the assistant sees what the contact is replying to. */
+export function withQuote(message: WAMessage, text: string): string {
+  const quote = extractQuote(message);
+  if (!quote) return text;
+  const quoted = quote.split("\n").map(line => `> ${line}`).join("\n");
+  return `Replying to this earlier message:\n${quoted}\n\n${text}`.trimEnd();
+}
