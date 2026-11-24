@@ -83,6 +83,7 @@ export class Bridge {
       this.logger(`Replaying ${usable.length} unanswered message${usable.length === 1 ? '' : 's'} from ${route.name}.`);
       this.enqueue({ id: entry.messageId, contact: { id: contactId, name: route.name }, text: entry.text, attachments: entry.attachments, acknowledge: async () => {} }, Promise.resolve());
     }
+    if (byContact.size === 0) this.logger('Checked for unanswered messages: none pending.');
   }
   private enqueue(message: IncomingMessage, saved: Promise<void>): void {
     const key = `${this.store.canonicalId(message.contact.id)}:${message.id}`;
