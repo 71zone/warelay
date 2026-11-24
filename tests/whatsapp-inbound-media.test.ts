@@ -83,7 +83,8 @@ test('a captioned photo is downloaded into the media store and forwarded with it
 
 test('a photo without caption is forwarded with empty text, and the mime type picks the extension', async () => {
   await withInbound(async () => PHOTO, async h => {
-    await h.emit(message('IMG2', { imageMessage: { mimetype: 'image/png' } }), message('IMG3', { imageMessage: { mimetype: 'image/webp' } }));
+    await h.emit(message('IMG2', { imageMessage: { mimetype: 'image/png' } }));
+    await h.emit(message('IMG3', { imageMessage: { mimetype: 'image/webp' } }));
     assert.deepEqual(h.received.map(m => [m.id, m.text, m.attachments[0]?.fileName, m.attachments[0]?.mimeType]), [
       ['IMG2', '', 'IMG2.png', 'image/png'],
       ['IMG3', '', 'IMG3.webp', 'image/webp'],
@@ -93,11 +94,9 @@ test('a photo without caption is forwarded with empty text, and the mime type pi
 
 test('a view-once photo and an image sent as a document are unwrapped and forwarded', async () => {
   await withInbound(async () => PHOTO, async h => {
-    await h.emit(
-      message('ONCE', { viewOnceMessage: { message: { imageMessage: { caption: 'secret', mimetype: 'image/jpeg' } } } }),
-      message('DOC', { documentMessage: { caption: 'as file', mimetype: 'image/heic', fileName: 'x.heic' } }),
-      message('PDF', { documentMessage: { mimetype: 'application/pdf', fileName: 'x.pdf' } }),
-    );
+    await h.emit(message('ONCE', { viewOnceMessage: { message: { imageMessage: { caption: 'secret', mimetype: 'image/jpeg' } } } }));
+    await h.emit(message('DOC', { documentMessage: { caption: 'as file', mimetype: 'image/heic', fileName: 'x.heic' } }));
+    await h.emit(message('PDF', { documentMessage: { mimetype: 'application/pdf', fileName: 'x.pdf' } }));
     assert.deepEqual(h.received.map(m => [m.id, m.text, m.attachments[0]?.fileName, m.attachments[0]?.mimeType]), [
       ['ONCE', 'secret', 'ONCE.jpg', 'image/jpeg'],
       ['DOC', 'as file', 'DOC.heic', 'image/heic'],

@@ -7,6 +7,8 @@ const CURRENT_VERSION = 3;
 /** Recent turns kept per contact for provider handoff, and the longest text kept per turn. */
 const MAX_TURNS = 16;
 const MAX_TURN_CHARS = 2000;
+/** A pending incoming message older than this is discarded: the answer would no longer be timely, and its photos are purged from the media store by then. */
+export const MAX_PENDING_AGE_MS = 24 * 60 * 60_000;
 
 const ttlSchema = z.number().int().positive().refine(minutes => Number.isSafeInteger(minutes * 60_000), 'Conversation lifetime is out of range.');
 const timestampSchema = z.number().int().nonnegative();
@@ -20,6 +22,9 @@ const routeSchema = z.object({
   refs: z.record(z.string().min(1), slotSchema),
 });
 const deliverySchema = z.object({ key: z.string(), contactId: z.string().min(1), status: deliveryStatus });
+const attachmentSchema = z.object({ kind: z.enum(['image', 'video', 'audio', 'document']), path: z.string().min(1), fileName: z.string(), mimeType: z.string() });
+/** An accepted incoming message of an enabled contact that has not been answered yet. `text` already carries any quote prefix; `messageId` is the id the delivery journal uses for it. */
+const pendingSchema = z.object({ contactId: z.string().min(1), messageId: z.string().min(1), text: z.string(), attachments: z.array(attachmentSchema), receivedAt: timestampSchema });
 const aliasesSchema = z.array(z.object({ alias: z.string().min(1), canonical: z.string().min(1) }));
 const turnSchema = z.object({ role: z.enum(['user', 'assistant']), provider: z.string().min(1), text: z.string(), at: timestampSchema });
 const settingsSchema = z.object({
@@ -35,6 +40,8 @@ const stateSchema = z.object({
   limits: z.record(z.string().min(1), timestampSchema),
   /** Text of each contact's last few turns, only so another provider can continue the conversation. Keyed by canonical contact id. */
   turns: z.record(z.string().min(1), z.array(turnSchema)),
+  /** Incoming messages of enabled contacts held until they are answered (or fail), so none is lost to a crash or restart. Absent in files written before it existed. */
+  pending: z.array(pendingSchema).default([]),
 });
 
 /** Version 2 held one conversation and project per contact, all on ChatGPT. It is read, never written. */
@@ -64,6 +71,7 @@ const legacyStateSchema = z.object({
 export type Route = z.infer<typeof routeSchema>;
 export type ProviderSlot = z.infer<typeof slotSchema>;
 export type Delivery = z.infer<typeof deliverySchema>;
+export type PendingMessage = z.infer<typeof pendingSchema>;
 export type PersistedState = z.infer<typeof stateSchema>;
 /** Storage port. `read` returns the raw stored document or undefined when nothing is stored yet; `write` replaces it atomically. */
 export interface StatePersistence {
@@ -112,7 +120,7 @@ function parseStored(raw: unknown): PersistedState {
       return stateSchema.parse({
         version: CURRENT_VERSION, running: old.running, aliases: old.aliases,
         routes: old.routes.map(({ conversationRef, projectRef, conversationStartedAt, ...route }) => ({ ...route, refs: { [LEGACY_PROVIDER]: { conversationRef, projectRef, startedAt: conversationStartedAt } } })),
-        deliveries: old.deliveries, settings: defaultSettings(), limits: {}, turns: {},
+        deliveries: old.deliveries, settings: defaultSettings(), limits: {}, turns: {}, pending: [],
       });
     }
     if (version !== CURRENT_VERSION) throw new Error(`Unsupported saved state version ${String(version)}. This build reads versions 1 to ${CURRENT_VERSION}.`);
@@ -149,7 +157,7 @@ export class RoutingState {
   static async load(persistence: StatePersistence, references: ProviderReferences, now: () => number = Date.now): Promise<RoutingState> {
     const raw = await persistence.read();
     const data: PersistedState = raw === undefined
-      ? { version: CURRENT_VERSION, running: false, aliases: [], routes: [], deliveries: [], settings: defaultSettings(), limits: {}, turns: {} }
+      ? { version: CURRENT_VERSION, running: false, aliases: [], routes: [], deliveries: [], settings: defaultSettings(), limits: {}, turns: {}, pending: [] }
       : parseStored(raw);
     const known = new Set(Object.keys(references));
     const unknown = (provider: string): Error => new Error(`Saved state mentions the assistant "${provider}", which this build does not provide.`);
@@ -194,6 +202,8 @@ export class RoutingState {
       const route = data.routes.find(item => (canonical.get(item.contactId) ?? item.contactId) === owner);
       if (route) { route.enabled = false; route.error = 'Interrupted delivery. Inspect both conversations before enabling again. The message will not be replayed.'; }
     }
+    const oldest = baseline - MAX_PENDING_AGE_MS;
+    data.pending = data.pending.filter(entry => entry.receivedAt >= oldest && data.routes.some(route => route.enabled && (canonical.get(route.contactId) ?? route.contactId) === (canonical.get(entry.contactId) ?? entry.contactId)));
     const state = new RoutingState(data, persistence, references, now);
     await state.save();
     return state;
@@ -343,6 +353,7 @@ export class RoutingState {
       if (!previous || priority[delivery.status] > priority[previous.status]) deliveries.set(identity, { ...delivery, contactId, key });
     }
     this.data.deliveries = [...deliveries.values()];
+    for (const entry of this.data.pending) if (entry.contactId === alias) { entry.contactId = canonical; changed = true; }
     if (changed) await this.save();
   }
   async enable(contact: Contact): Promise<void> {
@@ -357,6 +368,7 @@ export class RoutingState {
     const route = this.data.routes.find(item => item.contactId === contactId);
     if (!route) throw new Error('Contact has no route.');
     route.enabled = false; route.error = error;
+    this.data.pending = this.data.pending.filter(entry => entry.contactId !== contactId);
     await this.save();
   }
   /** Assigns or clears the project on one provider. Creates a paused route for an untouched contact. A changed project drops that provider's local conversation link. */
@@ -435,6 +447,49 @@ export class RoutingState {
     const delivery = this.findDelivery(key, contactId);
     if (!delivery) throw new Error('Unknown delivery.');
     delivery.status = status;
+    this.dropPending(contactId, key);
+    await this.save();
+  }
+  private dropPending(contactId: string, key: string): void {
+    const identity = this.ownerKey(key, contactId);
+    this.data.pending = this.data.pending.filter(entry => this.ownerKey(`${entry.contactId}:${entry.messageId}`, entry.contactId) !== identity);
+  }
+  /**
+   * Pending messages that can still be answered, oldest first: younger than 24 hours and owned by an enabled contact. Entries whose delivery the journal
+   * records as done or failed are removed instead of listed; one still `working` stays, and the caller skips it while it is in progress.
+   */
+  async pendingMessages(): Promise<PendingMessage[]> {
+    const oldest = this.now() - MAX_PENDING_AGE_MS;
+    const keep = (entry: PendingMessage): boolean => {
+      const status = this.findDelivery(`${entry.contactId}:${entry.messageId}`, entry.contactId)?.status;
+      return entry.receivedAt >= oldest && this.data.routes.some(route => route.enabled && route.contactId === entry.contactId) && status !== 'done' && status !== 'failed';
+    };
+    const kept = this.data.pending.filter(keep);
+    if (kept.length !== this.data.pending.length) { this.data.pending = kept; await this.save(); }
+    return kept.map(entry => ({ ...entry, attachments: entry.attachments.map(attachment => ({ ...attachment })) })).sort((a, b) => a.receivedAt - b.receivedAt);
+  }
+  /**
+   * Stores an accepted message of an enabled contact before anything else happens to it. The entry is added synchronously; the returned promise resolves once
+   * it is on disk. A message the journal or the queue already holds is not stored again.
+   */
+  addPending(entry: Omit<PendingMessage, 'receivedAt'>): Promise<void> {
+    const contactId = this.canonicalId(entry.contactId);
+    if (this.hasDelivery(contactId, entry.messageId) || this.data.pending.some(item => item.contactId === contactId && item.messageId === entry.messageId)) return Promise.resolve();
+    this.data.pending.push({ ...entry, contactId, receivedAt: this.now(), attachments: entry.attachments.map(attachment => ({ ...attachment })) });
+    return this.save();
+  }
+  /** Removes one pending message without a delivery (its files vanished, or the journal already covers it). */
+  async removePending(contactId: string, messageId: string): Promise<void> {
+    contactId = this.canonicalId(contactId);
+    const before = this.data.pending.length;
+    this.data.pending = this.data.pending.filter(entry => !(entry.contactId === contactId && entry.messageId === messageId));
+    if (this.data.pending.length !== before) await this.save();
+  }
+  /** Replaces several pending messages of one contact by the single combined prompt that will be delivered for them. */
+  async combinePending(contactId: string, messageIds: readonly string[], combined: PendingMessage): Promise<void> {
+    contactId = this.canonicalId(contactId);
+    this.data.pending = this.data.pending.filter(entry => !(entry.contactId === contactId && messageIds.includes(entry.messageId)));
+    this.data.pending.push({ ...combined, contactId });
     await this.save();
   }
   /** Snapshots synchronously, then writes in call order so a slow earlier write can never overwrite a newer one. */

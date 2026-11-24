@@ -19,7 +19,7 @@ const FATAL_CODES = new Set<number>([DisconnectReason.connectionReplaced, Discon
 export interface LinkState {
   socket: WASocket | null;
   open: boolean;
-  /** First Unix second whose messages are forwarded; earlier ones are history. See catchUpCutoff. */
+  /** First Unix second whose messages of chats that are not forwarded count as new; earlier ones are history. Enabled chats ignore it (see Inbound). See catchUpCutoff. */
   cutoffSeconds: number;
 }
 
@@ -38,8 +38,6 @@ export interface ConnectionOptions {
   attachListeners: (ev: WASocket["ev"]) => () => void;
   /** Waits for in-flight inbound messages during stop. */
   drainInbound: () => Promise<void>;
-  /** Runs after every connection open (including reconnects and restarts); must not throw. `signal` aborts when that socket is torn down. */
-  onOpen?: (socket: WASocket, signal: AbortSignal) => Promise<void>;
   onStatus: (status: string) => void;
   onQr: ((qr: string) => void) | undefined;
   /** Messages sent before this Unix second are history even when warelay was offline; defaults to each start() time. A saved liveness watermark can only move the cutoff earlier. */
@@ -66,8 +64,6 @@ export function createConnection(options: ConnectionOptions): Connection {
   let paired = false;
   let reconnectTimer: NodeJS.Timeout | null = null;
   let identityLookup: Promise<void> = Promise.resolve();
-  let recoveryRun: Promise<void> = Promise.resolve();
-  let recoveryAbort: AbortController | null = null;
   let watermarkTimer: NodeJS.Timeout | null = null;
   let watermarkFailed = false;
   const pendingSaves = new Set<Promise<void>>();
@@ -94,7 +90,6 @@ export function createConnection(options: ConnectionOptions): Connection {
   }
 
   function teardownSocket(): void {
-    recoveryAbort?.abort();
     if (watermarkTimer) { clearInterval(watermarkTimer); watermarkTimer = null; }
     detach?.();
     detach = null;
@@ -184,9 +179,6 @@ export function createConnection(options: ConnectionOptions): Connection {
     options.onQr?.("");
     identityLookup = ingest.resolveCachedAliases(current, () => current === link.socket && !stopping)
       .catch(error => logger(`Could not resolve cached contact aliases: ${describeError(error)}`));
-    recoveryAbort?.abort();
-    recoveryAbort = new AbortController();
-    recoveryRun = options.onOpen ? options.onOpen(current, recoveryAbort.signal) : Promise.resolve();
     settleReady();
   }
 
@@ -291,7 +283,6 @@ export function createConnection(options: ConnectionOptions): Connection {
       markAlive();
       teardownSocket();
       settleReady(new Error("WhatsApp adapter stopped before the connection opened"));
-      await recoveryRun;
       await options.drainInbound();
       await identityLookup;
       await Promise.allSettled([...pendingSaves]);

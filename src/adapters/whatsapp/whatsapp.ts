@@ -5,10 +5,9 @@ import type { MediaStore } from "../../infrastructure/media.js";
 import { createDirectorySaver } from "./autosave.js";
 import { createConnection, createLinkState } from "./connection.js";
 import { Directory } from "./directory.js";
-import { createInbound } from "./inbound.js";
+import { createInbound, type Forwarding } from "./inbound.js";
 import { createDirectoryIngest } from "./ingestion.js";
 import { createOutbound, type OutboundTiming } from "./outbound.js";
-import { createUnansweredRecovery, type RecoveryTiming } from "./unanswered.js";
 
 export interface WhatsAppOptions {
   authDir: string;
@@ -25,8 +24,8 @@ export interface WhatsAppOptions {
   media: MediaStore;
   /** Overrides pacing and connection waits for replies; tests use it to avoid real delays. */
   outboundTiming?: Partial<OutboundTiming>;
-  /** Checks the chats of these contacts for unanswered messages on every connection open; omitted, nothing is recovered. */
-  recovery?: { targets: () => Contact[]; isDelivered: (contactId: string, messageId: string) => boolean; timing?: Partial<RecoveryTiming> };
+  /** Which chats are forwarded and which messages the delivery journal already holds. Their messages are accepted for 24 hours regardless of the link's cutoff. */
+  forwarding?: Forwarding;
 }
 
 const DIRECT_NUMBER = /^[1-9]\d{6,14}@s\.whatsapp\.net$/;
@@ -38,9 +37,8 @@ export function createWhatsApp(options: WhatsAppOptions): MessagingAdapter {
   const saver = createDirectorySaver(directory, logger, options.onUpdate);
   const ingest = createDirectoryIngest(directory, { onIdentity: options.onIdentity, changed: saver.schedule });
   const link = createLinkState();
-  const inbound = createInbound({ directory, ingest, saver, link, logger, onMessage, media: options.media });
+  const inbound = createInbound({ directory, ingest, saver, link, logger, onMessage, media: options.media, forwarding: options.forwarding });
   const sendReply = createOutbound({ link, media: options.media, logger, timing: options.outboundTiming });
-  const recovery = options.recovery && createUnansweredRecovery({ link, logger, directory, ingest, forward: inbound.forwardRecovered, timing: options.recovery.timing, targets: options.recovery.targets, isDelivered: options.recovery.isDelivered });
   const connection = createConnection({
     authDir, logger, link, directory, ingest, saver, onStatus, onQr: options.onQr, notBeforeSeconds: options.notBeforeSeconds,
     attachListeners: ev => {
@@ -49,7 +47,6 @@ export function createWhatsApp(options: WhatsAppOptions): MessagingAdapter {
       return () => { detachDirectory(); detachInbound(); };
     },
     drainInbound: inbound.drain,
-    onOpen: recovery?.run,
   });
 
   function chatName(jid: string, stored: string): string {

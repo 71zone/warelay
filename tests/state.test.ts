@@ -413,7 +413,7 @@ test('JSON state persistence is private, atomic, serialized and reports absence 
   await withDirectory(async directory => {
     const persistence = createJsonStatePersistence(join(directory, 'nested', 'data'));
     assert.equal(await persistence.read(), undefined);
-    const base: PersistedState = { version: 3, running: false, aliases: [], routes: [], deliveries: [], settings: { providers: ['chatgpt'], retriesBeforeFallback: 2, options: {} }, limits: {}, turns: {} };
+    const base: PersistedState = { version: 3, running: false, aliases: [], routes: [], deliveries: [], settings: { providers: ['chatgpt'], retriesBeforeFallback: 2, options: {} }, limits: {}, turns: {}, pending: [] };
     const writes = Array.from({ length: 20 }, (_, index) => persistence.write({ ...base, deliveries: [{ key: String(index), contactId: 'x', status: 'done' }] }));
     await Promise.all(writes);
     const data = join(directory, 'nested', 'data');

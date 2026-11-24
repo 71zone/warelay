@@ -1,7 +1,8 @@
+import { existsSync } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { AllProvidersLimitedError, NotSentError, type Assistant, type IncomingMessage, type Logger, type MessagingAdapter, type ProviderId } from './contracts.js';
 import { providerName } from './providers.js';
-import type { RoutingState } from './state.js';
+import type { PendingMessage, RoutingState } from './state.js';
 
 /** User-facing name of the messaging provider used in log lines and route errors; assistant names come from the provider that handled the message. */
 export interface ProviderNames { channelName: string }
@@ -22,20 +23,74 @@ function failureNotice(assistantName: string, replied: boolean, detail: string):
 
 export class Bridge {
   private queue: Promise<void> = Promise.resolve();
+  private replaying: Promise<void> = Promise.resolve();
   private armed = false;
   private readonly pendingReceipts = new Set<Promise<void>>();
+  /** Journal keys of the messages this process has accepted and not finished, so a replay never queues one of them a second time. */
+  private readonly active = new Set<string>();
   constructor(private readonly store: RoutingState, private readonly assistant: Assistant, private readonly channel: MessagingAdapter, private readonly logger: Logger, private readonly names: ProviderNames) {}
   arm(): void { this.armed = true; }
   disarm(): void { this.armed = false; }
   isArmed(): boolean { return this.armed; }
   async idle(): Promise<void> {
+    await this.replaying;
     await this.queue;
     await Promise.allSettled([...this.pendingReceipts]);
   }
+  /**
+   * Accepts a message of an enabled contact while forwarding is on (or wanted: a bridge that stopped on an error is re-armed by the watchdog). The message is
+   * written to the pending queue first and leaves it only when its delivery finishes, so a crash or restart before the reply cannot lose it (see replay).
+   */
   receive(message: IncomingMessage): void {
-    if (!this.armed || !this.store.route(message.contact.id)?.enabled) return;
+    if (!this.store.route(message.contact.id)?.enabled || !(this.armed || this.store.isRunning())) return;
     if (!message.text.trim() && message.attachments.length === 0) return;
-    this.queue = this.queue.then(() => this.forward(message)).catch(error => {
+    const saved = this.store.addPending({ contactId: message.contact.id, messageId: message.id, text: message.text, attachments: message.attachments.map(attachment => ({ ...attachment })) });
+    this.enqueue(message, saved);
+  }
+  /**
+   * Delivers what is still pending: messages accepted earlier whose delivery never finished (restart, crash, forwarding stopped on an error). Call it once
+   * forwarding is armed. Entries the journal records as finished, older than 24 hours or whose files are gone are dropped. Several pending messages of one contact
+   * become one prompt, oldest first. Read receipts are not repeated for them.
+   */
+  replay(): void {
+    this.replaying = this.replaying.then(() => this.replayPending()).catch(error => this.logger(`Could not replay unanswered messages: ${describe(error)}`));
+  }
+  private async replayPending(): Promise<void> {
+    const byContact = new Map<string, PendingMessage[]>();
+    for (const entry of await this.store.pendingMessages()) {
+      if (this.active.has(`${entry.contactId}:${entry.messageId}`)) continue;
+      byContact.set(entry.contactId, [...byContact.get(entry.contactId) ?? [], entry]);
+    }
+    for (const [contactId, entries] of byContact) {
+      const route = this.store.route(contactId);
+      if (!route?.enabled) continue;
+      const usable: PendingMessage[] = [];
+      for (const entry of entries) {
+        const missing = entry.attachments.find(attachment => !existsSync(attachment.path));
+        if (missing) {
+          this.logger(`Dropped an unanswered message from ${route.name}: its attachment ${missing.fileName} is no longer on disk.`);
+          await this.store.removePending(contactId, entry.messageId);
+        } else usable.push(entry);
+      }
+      const newest = usable.at(-1);
+      const oldest = usable[0];
+      if (!newest || !oldest) continue;
+      let entry = newest;
+      if (usable.length > 1) {
+        entry = { contactId, messageId: newest.messageId, text: usable.map(item => item.text).filter(text => text.length > 0).join('\n\n'), attachments: usable.flatMap(item => item.attachments), receivedAt: oldest.receivedAt };
+        await this.store.combinePending(contactId, usable.map(item => item.messageId), entry);
+      }
+      this.logger(`Replaying ${usable.length} unanswered message${usable.length === 1 ? '' : 's'} from ${route.name}.`);
+      this.enqueue({ id: entry.messageId, contact: { id: contactId, name: route.name }, text: entry.text, attachments: entry.attachments, acknowledge: async () => {} }, Promise.resolve());
+    }
+  }
+  private enqueue(message: IncomingMessage, saved: Promise<void>): void {
+    const key = `${this.store.canonicalId(message.contact.id)}:${message.id}`;
+    this.active.add(key);
+    this.queue = this.queue.then(async () => {
+      try { await saved; await this.forward(message); }
+      finally { this.active.delete(key); }
+    }).catch(error => {
       this.disarm();
       this.logger(`Bridge stopped forwarding: ${error instanceof Error ? error.message : String(error)}`);
     });
@@ -45,7 +100,7 @@ export class Bridge {
     const contactId = message.contact.id;
     if (!this.armed || !this.store.route(contactId)?.enabled) return;
     const key = `${contactId}:${message.id}`;
-    if (!await this.store.claim(key, contactId)) return;
+    if (!await this.store.claim(key, contactId)) { await this.store.removePending(contactId, message.id); return; }
     const route = await this.store.refreshConversation(contactId);
     if (!this.armed || !route?.enabled) { await this.store.finish(key, contactId, 'failed'); return; }
     const started = performance.now();

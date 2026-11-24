@@ -46,7 +46,7 @@ test('watermark file round-trips and unreadable content counts as no watermark',
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
-test('offline backlog arriving as append is forwarded oldest first once, but only from the cutoff on', async () => {
+test('without a forwarded chat the cutoff still holds history back; the backlog after it goes out once, oldest first, as one prompt per batch', async () => {
   const root = await mkdtemp(join(tmpdir(), 'wa-catchup-'));
   try {
     const directory = new Directory(root);
@@ -68,7 +68,7 @@ test('offline backlog arriving as append is forwarded oldest first once, but onl
     ev.emit('messages.upsert', { type: 'notify', messages: [text('second', NOW - 1800), text('live', NOW)] });
     await inbound.drain();
 
-    assert.deepEqual(received.map(message => message.id), ['first', 'second', 'live']);
+    assert.deepEqual(received.map(message => [message.id, message.text]), [['second', 'body first\n\nbody second'], ['live', 'body live']]);
     assert.deepEqual(logs, [
       'WhatsApp delivered 3 offline message(s).',
       'WhatsApp delivered 1 offline message(s).',
