@@ -37,6 +37,7 @@ export async function createApplication(config: LoadedConfig, options: { notBefo
     onIdentity: alias => { void application?.linkIdentity(alias).catch(error => logger(error instanceof Error ? error.message : String(error))); },
     onQr: payload => application?.emit('qr', payload),
     notBeforeSeconds: options.notBeforeSeconds,
+    recovery: { targets: () => application?.recoveryTargets() ?? [], isDelivered: (contactId, messageId) => store.hasDelivery(contactId, messageId) },
   });
   for (const alias of channel.identities()) await store.linkIdentity(alias);
   application = new Application({ configPath: config.path, channelName: 'WhatsApp' }, store, channel, assistant);

@@ -136,6 +136,6 @@ test('text stays text-only, other media stays ignored, and own or historical pho
     );
     assert.deepEqual(h.received.map(m => [m.id, m.text, m.attachments]), [['TXT', 'hello', []]]);
     assert.deepEqual(h.downloads, []);
-    assert.deepEqual(h.logs, []);
+    assert.deepEqual(h.logs, ['WhatsApp delivered 6 message(s).']);
   });
 });

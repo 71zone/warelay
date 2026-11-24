@@ -69,7 +69,12 @@ test('offline backlog arriving as append is forwarded oldest first once, but onl
     await inbound.drain();
 
     assert.deepEqual(received.map(message => message.id), ['first', 'second', 'live']);
-    assert.deepEqual(logs, ['Caught up: relayed 2 messages sent while warelay was offline.']);
+    assert.deepEqual(logs, [
+      'WhatsApp delivered 3 offline message(s).',
+      'WhatsApp delivered 1 offline message(s).',
+      'WhatsApp delivered 2 message(s).',
+      'Caught up: relayed 2 messages sent while warelay was offline.',
+    ]);
     await saver.flush();
   } finally { await rm(root, { recursive: true, force: true }); }
 });

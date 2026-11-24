@@ -421,6 +421,10 @@ export class RoutingState {
     }
     return this.copy(route);
   }
+  /** True when the delivery journal holds this message of this contact, in any status. */
+  hasDelivery(contactId: string, messageId: string): boolean {
+    return this.findDelivery(`${contactId}:${messageId}`, contactId) !== undefined;
+  }
   async claim(key: string, contactId: string): Promise<boolean> {
     if (this.findDelivery(key, contactId)) return false;
     this.data.deliveries.push({ key: this.ownerKey(key, contactId), contactId: this.canonicalId(contactId), status: 'working' });

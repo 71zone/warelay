@@ -52,6 +52,10 @@ export class Application extends EventEmitter<{ change: []; log: [message: strin
   /** The provider new contacts and project picks use: the first configured. */
   primaryProvider(): ProviderId { return this.store.settings().providers[0] ?? ''; }
   receive(incoming: IncomingMessage): void { this.bridge.receive(incoming); }
+  /** Contacts whose chats are checked for unanswered messages when the channel opens: the enabled routes, none while forwarding is not active. */
+  recoveryTargets(): Contact[] {
+    return this.bridge.isArmed() ? this.store.routes().filter(route => route.enabled).map(route => ({ id: route.contactId, name: route.name })) : [];
+  }
   async linkIdentity(alias: IdentityAlias): Promise<void> {
     await this.store.linkIdentity(alias);
     this.emit('change');
