@@ -13,7 +13,7 @@ Everything warelay remembers lives in one data directory (`dataDir` in [Configur
 | Path in the data directory | Contents |
 | --- | --- |
 | `state.json` | Forwarding sessions and the delivery journal: contact names, JIDs, per-assistant project and conversation references, lifetimes, conversation start times, activity metadata, processed message IDs and verified identity aliases. Also the assistant order and retry setting, the time each limited assistant is usable again, and each contact's recent turns (see below). |
-| `whatsapp/` | WhatsApp linked-device credentials and the persisted contact/chat directory. Do not share this directory. |
+| `whatsapp/` | WhatsApp linked-device credentials, the persisted contact/chat directory and `liveness.json` (one number: the Unix second the WhatsApp link was last alive, refreshed every 30 seconds while connected; it lets the next start relay messages sent while warelay was offline, see [Delivery](../concepts/delivery.md#messages-sent-while-offline)). Do not share this directory. |
 | `onboarding.json` | Only first-run setup progress: which browser you chose, the stage reached and timestamps. Also remembers your previous native `browserMcpUrl` when the managed browser replaces it. |
 | `server-token` | The owner token for `warelay serve`, unless `server.tokenFile` points elsewhere. Mode 0600. |
 | `bridge.lock` | The single-writer lock, present only while a process runs. |

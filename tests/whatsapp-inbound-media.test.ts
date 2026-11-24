@@ -34,7 +34,7 @@ async function withInbound(download: (message: WAMessage) => Promise<Buffer>, ru
     const link = createLinkState();
     link.socket = { readMessages: async () => {} } as unknown as WASocket;
     link.open = true;
-    link.startedAtSeconds = STARTED;
+    link.cutoffSeconds = STARTED;
     const received: IncomingMessage[] = [];
     const logs: string[] = [];
     const downloads: string[] = [];

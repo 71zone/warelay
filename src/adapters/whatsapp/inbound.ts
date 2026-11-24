@@ -12,6 +12,9 @@ import type { DirectoryIngest } from "./ingestion.js";
 import { describeError, extractImage, extractText, imageExtension, isOneToOneUserJid, messageSeconds, withQuote } from "./protocol.js";
 import type { ImageContent } from "./protocol.js";
 
+/** Message IDs remembered to drop a message WhatsApp delivers twice; the delivery journal covers restarts. */
+const MAX_REMEMBERED_IDS = 2000;
+
 export interface Inbound {
   /** Subscribes live message upserts; returns the detach function. */
   attach(ev: WASocket["ev"]): () => void;
@@ -32,9 +35,10 @@ export interface InboundOptions {
 }
 
 /**
- * Live-only forwarding policy: only `notify` upserts that arrived after this start, from direct contacts, with text or a photo
- * and not authored by this account, reach `onMessage`. Photos are downloaded into the media store first; a photo that cannot be
- * downloaded is dropped with a log line rather than forwarded without its image.
+ * Forwarding policy: only `notify` and `append` upserts (WhatsApp delivers messages queued while this device was offline as
+ * `append`) sent at or after the link's cutoff, from direct contacts, with text or a photo and not authored by this account,
+ * reach `onMessage`, oldest first, once per message ID per process. Photos are downloaded into the media store first; a photo
+ * that cannot be downloaded is dropped with a log line rather than forwarded without its image.
  * Every direct message (including own and historical ones) still refreshes the chat directory.
  */
 export function createInbound(options: InboundOptions): Inbound {
@@ -46,6 +50,7 @@ export function createInbound(options: InboundOptions): Inbound {
     return downloadMediaMessage(message, "buffer", {}, { logger: baileysLogger, reuploadRequest: socket.updateMediaMessage });
   });
   let queue: Promise<void> = Promise.resolve();
+  const forwarded = new Set<string>();
 
   async function resolveIncomingJid(message: WAMessage): Promise<string | null> {
     const remote = message.key.remoteJid;
@@ -74,9 +79,10 @@ export function createInbound(options: InboundOptions): Inbound {
     };
   }
 
-  async function handleLiveMessage(message: WAMessage): Promise<void> {
+  /** Resolves true when the message was handed to `onMessage`. */
+  async function handleLiveMessage(message: WAMessage): Promise<boolean> {
     const jid = await resolveIncomingJid(message);
-    if (!jid) return;
+    if (!jid) return false;
     const sentAt = messageSeconds(message);
     const existing = directory.chats.get(jid);
     if (!message.key.fromMe) ingest.upsertRecord(jid, { notify: message.pushName ?? undefined });
@@ -87,19 +93,24 @@ export function createInbound(options: InboundOptions): Inbound {
     });
     saver.schedule();
     const { id, remoteJid } = message.key;
-    if (message.key.fromMe || !id || !remoteJid) return;
-    if (sentAt === undefined || sentAt < link.startedAtSeconds) return;
+    if (message.key.fromMe || !id || !remoteJid) return false;
+    if (sentAt === undefined || sentAt < link.cutoffSeconds || forwarded.has(id)) return false;
     const contact = ingest.toContact(directory.records.get(jid) ?? { jid });
     const image = extractImage(message);
+    let incoming: IncomingMessage;
     if (image) {
       const attachments = await downloadPhoto(message, id, contact.name, image);
-      if (!attachments) return;
-      onMessage({ id, contact, text: withQuote(message, image.caption), attachments, acknowledge: receiptFor({ ...message.key, id, remoteJid }) });
-      return;
+      if (!attachments) return false;
+      incoming = { id, contact, text: withQuote(message, image.caption), attachments, acknowledge: receiptFor({ ...message.key, id, remoteJid }) };
+    } else {
+      const text = extractText(message);
+      if (text === undefined) return false;
+      incoming = { id, contact, text: withQuote(message, text), attachments: [], acknowledge: receiptFor({ ...message.key, id, remoteJid }) };
     }
-    const text = extractText(message);
-    if (text === undefined) return;
-    onMessage({ id, contact, text: withQuote(message, text), attachments: [], acknowledge: receiptFor({ ...message.key, id, remoteJid }) });
+    forwarded.add(id);
+    if (forwarded.size > MAX_REMEMBERED_IDS) forwarded.delete(forwarded.values().next().value ?? id);
+    onMessage(incoming);
+    return true;
   }
 
   /** Saves the photo under the media store; returns undefined (after logging why) when it must not be forwarded. */
@@ -124,22 +135,25 @@ export function createInbound(options: InboundOptions): Inbound {
     }
   }
 
-  function enqueue(messages: WAMessage[]): void {
+  function enqueue(messages: WAMessage[], backlog: boolean): void {
+    const ordered = [...messages].sort((a, b) => (messageSeconds(a) ?? 0) - (messageSeconds(b) ?? 0));
     queue = queue.then(async () => {
-      for (const message of messages) {
+      let caughtUp = 0;
+      for (const message of ordered) {
         try {
-          await handleLiveMessage(message);
+          if (await handleLiveMessage(message) && backlog) caughtUp += 1;
         } catch (error) {
           logger(`Failed to handle WhatsApp message ${message.key.id ?? "?"}: ${describeError(error)}`);
         }
       }
+      if (caughtUp > 0) logger(`Caught up: relayed ${caughtUp} message${caughtUp === 1 ? "" : "s"} sent while warelay was offline.`);
     });
   }
 
   return {
     attach(ev): () => void {
       const onUpsert = (upsert: BaileysEventMap["messages.upsert"]): void => {
-        if (upsert.type === "notify") enqueue(upsert.messages);
+        enqueue(upsert.messages, upsert.type === "append");
       };
       ev.on("messages.upsert", onUpsert);
       return () => { ev.off("messages.upsert", onUpsert); };

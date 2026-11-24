@@ -6,6 +6,7 @@ import type { Logger } from "../../core/contracts.js";
 import type { DirectorySaver } from "./autosave.js";
 import type { Directory } from "./directory.js";
 import type { DirectoryIngest } from "./ingestion.js";
+import { CATCH_UP_MARGIN_SECONDS, WATERMARK_INTERVAL_MS, catchUpCutoff, readWatermark, writeWatermark } from "./liveness.js";
 import { describeError, disconnectStatusCode } from "./protocol.js";
 
 /** Attempts allowed before the first pairing completes, so an unscanned QR does not loop forever. */
@@ -18,11 +19,12 @@ const FATAL_CODES = new Set<number>([DisconnectReason.connectionReplaced, Discon
 export interface LinkState {
   socket: WASocket | null;
   open: boolean;
-  startedAtSeconds: number;
+  /** First Unix second whose messages are forwarded; earlier ones are history. See catchUpCutoff. */
+  cutoffSeconds: number;
 }
 
 export function createLinkState(): LinkState {
-  return { socket: null, open: false, startedAtSeconds: 0 };
+  return { socket: null, open: false, cutoffSeconds: 0 };
 }
 
 export interface ConnectionOptions {
@@ -38,7 +40,7 @@ export interface ConnectionOptions {
   drainInbound: () => Promise<void>;
   onStatus: (status: string) => void;
   onQr: ((qr: string) => void) | undefined;
-  /** Messages sent before this Unix second are history and are not forwarded; defaults to each start() time. */
+  /** Messages sent before this Unix second are history even when warelay was offline; defaults to each start() time. A saved liveness watermark can only move the cutoff earlier. */
   notBeforeSeconds?: number;
 }
 
@@ -62,6 +64,8 @@ export function createConnection(options: ConnectionOptions): Connection {
   let paired = false;
   let reconnectTimer: NodeJS.Timeout | null = null;
   let identityLookup: Promise<void> = Promise.resolve();
+  let watermarkTimer: NodeJS.Timeout | null = null;
+  let watermarkFailed = false;
   const pendingSaves = new Set<Promise<void>>();
   let ready: { resolve: () => void; reject: (error: Error) => void } | null = null;
 
@@ -73,7 +77,20 @@ export function createConnection(options: ConnectionOptions): Connection {
     else current.resolve();
   }
 
+  /** Records that the link is alive right now; a no-op while it is down so downtime is never counted as uptime. */
+  function markAlive(): void {
+    if (!link.open) return;
+    try {
+      writeWatermark(authDir, Math.floor(Date.now() / 1000));
+      watermarkFailed = false;
+    } catch (error) {
+      if (!watermarkFailed) logger(`Could not save the WhatsApp liveness time (offline catch-up may miss messages): ${describeError(error)}`);
+      watermarkFailed = true;
+    }
+  }
+
   function teardownSocket(): void {
+    if (watermarkTimer) { clearInterval(watermarkTimer); watermarkTimer = null; }
     detach?.();
     detach = null;
     const old = link.socket;
@@ -155,6 +172,8 @@ export function createConnection(options: ConnectionOptions): Connection {
   function handleOpen(current: WASocket): void {
     link.open = true;
     everOpened = true;
+    markAlive();
+    watermarkTimer ??= setInterval(markAlive, WATERMARK_INTERVAL_MS).unref();
     attempts = 0;
     onStatus("open");
     options.onQr?.("");
@@ -186,6 +205,7 @@ export function createConnection(options: ConnectionOptions): Connection {
       if (update.connection === "connecting") onStatus("connecting");
       if (update.connection === "open") handleOpen(current);
       if (update.connection === "close") {
+        markAlive();
         link.open = false;
         handleClose(update.lastDisconnect?.error);
       }
@@ -229,10 +249,16 @@ export function createConnection(options: ConnectionOptions): Connection {
       finished = false;
       everOpened = false;
       attempts = 0;
-      link.startedAtSeconds = options.notBeforeSeconds ?? Math.floor(Date.now() / 1000);
       await authCleanup;
       if (stopping) {
         throw new Error("WhatsApp adapter stopped before the connection opened");
+      }
+      const now = Math.floor(Date.now() / 1000);
+      const watermark = readWatermark(authDir);
+      link.cutoffSeconds = catchUpCutoff({ now, watermark, notBefore: options.notBeforeSeconds });
+      if (watermark !== undefined && now - watermark > CATCH_UP_MARGIN_SECONDS) {
+        const since = new Date(link.cutoffSeconds * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+        logger(`Catching up on messages sent while warelay was offline since ${since}.`);
       }
       const { promise: opened, resolve, reject } = Promise.withResolvers<void>();
       ready = { resolve, reject };
@@ -254,6 +280,7 @@ export function createConnection(options: ConnectionOptions): Connection {
         clearTimeout(reconnectTimer);
         reconnectTimer = null;
       }
+      markAlive();
       teardownSocket();
       settleReady(new Error("WhatsApp adapter stopped before the connection opened"));
       await options.drainInbound();

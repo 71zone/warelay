@@ -10,13 +10,17 @@ How an incoming WhatsApp message becomes a ChatGPT prompt and a WhatsApp reply. 
 
 ## What is forwarded
 
-Only incoming direct text and extended-text messages are forwarded. Groups, statuses, your outgoing messages, history sync, attachments and voice notes are not forwarded. History sync can update the saved directory without sending old messages to ChatGPT. Messages sent before this listener started are ignored. Only contacts you have enabled are forwarded; see [Terminal dashboard](../reference/terminal.md#enabling-a-contact) and [Conversations](conversations.md).
+Only incoming direct text and extended-text messages and photos are forwarded. Groups, statuses, your outgoing messages, history sync, videos and voice notes are not forwarded. History sync can update the saved directory without sending old messages to ChatGPT. Messages sent before the first time this WhatsApp login connected are ignored; see [Messages sent while offline](#messages-sent-while-offline) for the ones sent while warelay was stopped. Only contacts you have enabled are forwarded; see [Terminal dashboard](../reference/terminal.md#enabling-a-contact) and [Conversations](conversations.md).
 
 ## Queue and journal
 
 Messages are processed serially. The bridge saves each message ID in a delivery journal before submitting it, so duplicate events are not resent after restart. The journal and sessions live in `state.json` and hold no message or reply bodies ([Local data](../reference/local-data.md)). Replies use the selected ChatGPT web model and the existing conversation's context.
 
 When the contact answers with WhatsApp's reply feature (swipe or long-press, then Reply), the prompt starts with `Replying to this earlier message:` followed by the quoted text as a `>` block (cut at 2000 characters; a quoted photo or voice note appears as `[photo]` or `[voice message]`), then the contact's own text. Without that, the assistant would only see the short answer and not what it refers to.
+
+## Messages sent while offline
+
+A message a contact sent while warelay was not running (crash, quit, `x` restart, sleeping machine, WhatsApp disconnected) is received when the link comes back and relayed in order like any other, once. While connected, warelay saves the time the link was last alive every 30 seconds and when it closes or stops ([`liveness.json`](../reference/local-data.md#what-is-stored)). On the next start it forwards everything WhatsApp delivers that was sent since that time minus a 60-second margin, at most 24 hours back, and logs `Catching up on messages sent while warelay was offline since 09:41.` followed by `Caught up: relayed N messages ...` when backlog was relayed. WhatsApp hands such messages over as `append` upserts instead of `notify`, so both are accepted. A message already in the delivery journal, or delivered twice in one run, is not resent. With no saved time (first run, new QR pairing) only messages from the start onward are forwarded, so pairing never replays history. Disabled contacts, groups, voice notes and the other non-forwarded types are skipped as usual. Source: [`src/adapters/whatsapp/liveness.ts`](../../src/adapters/whatsapp/liveness.ts).
 
 ## Read receipts
 

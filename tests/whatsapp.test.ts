@@ -112,7 +112,7 @@ test('sending requires an open connection', async () => {
   });
 });
 
-test('live inbound policy forwards only fresh direct notify text and keeps receipts private to acknowledge', async () => {
+test('live inbound policy forwards only fresh direct text and keeps receipts private to acknowledge', async () => {
   await withAuthDir('wa-inbound-', async authDir => {
     const directory = new Directory(authDir);
     const saver = createDirectorySaver(directory, () => {}, undefined);
@@ -125,7 +125,7 @@ test('live inbound policy forwards only fresh direct notify text and keeps recei
       signalRepository: { lidMapping: { getPNForLID: async () => null } },
     } as unknown as WASocket;
     link.open = true;
-    link.startedAtSeconds = 1_700_000_000;
+    link.cutoffSeconds = 1_700_000_000;
     const received: IncomingMessage[] = [];
     const inbound = createInbound({ directory, ingest, saver, link, logger: () => {}, media: createMediaStore(join(authDir, 'media')), onMessage: message => received.push(message) });
     const ev = new EventEmitter();
@@ -136,7 +136,6 @@ test('live inbound policy forwards only fresh direct notify text and keeps recei
       return { key: { id, remoteJid, fromMe, ...(remoteJidAlt ? { remoteJidAlt } : {}) }, message: { conversation: `body ${id}` }, messageTimestamp: 1_700_000_100, pushName: 'Push', ...rest } as WAMessage;
     };
 
-    ev.emit('messages.upsert', { type: 'append', messages: [text('appended', PN)] });
     ev.emit('messages.upsert', { type: 'notify', messages: [
       text('group', '120363000000000000@g.us'),
       text('broadcast', 'status@broadcast'),
