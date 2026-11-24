@@ -159,6 +159,12 @@ export function createUnansweredRecovery(options: UnansweredRecoveryOptions): Un
       return;
     }
     const unanswered = selectUnanswered(history, { now: timing.now(), isDelivered: id => isDelivered(contact.id, id) });
+    for (const message of history.slice().sort((a, b) => (messageSeconds(b) ?? 0) - (messageSeconds(a) ?? 0)).slice(0, 4)) {
+      const sentAt = messageSeconds(message);
+      const kind = extractText(message) !== undefined ? "text" : extractImage(message) !== undefined ? "photo" : "other";
+      const id = message.key.id ?? "";
+      logger(`  ${sentAt ? new Date(sentAt * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "?"} ${message.key.fromMe ? "me" : "them"} ${kind} …${id.slice(-6)}${!message.key.fromMe && id && isDelivered(contact.id, id) ? " (already handled by warelay)" : ""}`);
+    }
     logger(`History for ${contact.name}: ${history.length} message${history.length === 1 ? "" : "s"} from the phone, ${unanswered.length} unanswered${unanswered.length > 0 ? ", forwarding as one prompt." : "."}`);
     if (unanswered.length > 0) await forward(unanswered);
   }

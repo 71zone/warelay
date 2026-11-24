@@ -115,7 +115,7 @@ test('recovery: the phone answers, the unanswered messages go out as ONE prompt,
     assert.equal(harness.received.length, 1);
     assert.equal(harness.received[0]?.id, 'r');
     assert.equal(harness.received[0]?.text, 'two\n\nthree');
-    assert.deepEqual(harness.logs, [
+    assert.deepEqual(harness.logs.filter(line => !line.startsWith('  ')), [
       'Checking Alice for unanswered messages…',
       'History for Alice: 4 messages from the phone, 2 unanswered, forwarding as one prompt.',
     ]);
